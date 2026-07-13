@@ -1,0 +1,15 @@
+# Core runtime
+numpy>=1.26
+
+# Test runner
+pytest>=8
+
+# STT backend. Install a CUDA-capable torch build appropriate for this machine.
+# install.ps1 installs CUDA PyTorch from the official cu128 index before this
+# file is installed. Do not add plain "torch" here, because PyPI may resolve to
+# a CPU-only build on Windows.
+transformers>=4.45
+accelerate>=0.33
+safetensors>=0.4
+sentencepiece>=0.2
+python-certifi-win32>=1.6

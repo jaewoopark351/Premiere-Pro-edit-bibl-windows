@@ -1,0 +1,24 @@
+{
+  "name": "aggressive",
+  "silence": {
+    "noise_db": -42.0,
+    "min_silence": 0.35
+  },
+  "cuts": {
+    "long_silence": 0.55,
+    "start_wait": 0.8,
+    "end_silence": 1.0,
+    "pad_before": 0.06,
+    "pad_after": 0.08,
+    "repeat_gap": 1.0,
+    "word_pad": 0.03,
+    "false_start_ratio": 0.68,
+    "short_utterance_max_duration": 0.45
+  },
+  "stt": {
+    "model": "openai/whisper-large-v3",
+    "language": "ko",
+    "allow_cpu_fallback": false
+  }
+}
+

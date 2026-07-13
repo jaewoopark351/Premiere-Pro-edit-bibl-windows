@@ -1,0 +1,24 @@
+{
+  "name": "conservative",
+  "silence": {
+    "noise_db": -45.0,
+    "min_silence": 0.8
+  },
+  "cuts": {
+    "long_silence": 1.2,
+    "start_wait": 1.5,
+    "end_silence": 2.0,
+    "pad_before": 0.2,
+    "pad_after": 0.2,
+    "repeat_gap": 0.45,
+    "word_pad": 0.04,
+    "false_start_ratio": 0.78,
+    "short_utterance_max_duration": 0.35
+  },
+  "stt": {
+    "model": "openai/whisper-large-v3",
+    "language": "ko",
+    "allow_cpu_fallback": false
+  }
+}
+

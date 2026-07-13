@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "premiere-pro-edit-bibl-windows"
+version = "0.1.0"
+description = "Windows and NVIDIA CUDA first rough-cut assistant for Premiere Pro."
+readme = "WINDOWS_SETUP.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [
+  { name = "Windows port contributors" }
+]
+dependencies = [
+  "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+stt = [
+  "transformers>=4.45",
+  "accelerate>=0.33",
+  "safetensors>=0.4",
+  "sentencepiece>=0.2",
+  "python-certifi-win32>=1.6",
+]
+dev = [
+  "pytest>=8",
+]
+
+[project.scripts]
+bibl-windows = "bibl_windows.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
