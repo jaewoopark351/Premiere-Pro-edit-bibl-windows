@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from .audio.presets import build_audio_filter_chain
 from .timeline.models import TimeRange
 
 
@@ -145,7 +146,17 @@ def detect_silence(ffmpeg: Path, media: Path, noise_db: float, min_silence: floa
     return silences
 
 
-def make_clean_wav(ffmpeg: Path, media: Path, output_wav: Path, sample_rate: int, channels: int) -> None:
+def make_clean_wav(
+    ffmpeg: Path,
+    media: Path,
+    output_wav: Path,
+    sample_rate: int,
+    channels: int,
+    audio_preset: str = "standard",
+    noise_floor_db: float | None = None,
+    breath_ranges: list[TimeRange] | None = None,
+) -> None:
+    filter_chain = build_audio_filter_chain(audio_preset, noise_floor_db=noise_floor_db, breath_ranges=breath_ranges)
     run_checked(
         [
             ffmpeg,
@@ -154,7 +165,7 @@ def make_clean_wav(ffmpeg: Path, media: Path, output_wav: Path, sample_rate: int
             "-i",
             media_input_arg(media),
             "-af",
-            "highpass=f=80,acompressor=threshold=-20dB:ratio=3:attack=5:release=150:makeup=2,loudnorm=I=-14:TP=-1.5:LRA=11",
+            filter_chain,
             "-vn",
             "-c:a",
             "pcm_s16le",

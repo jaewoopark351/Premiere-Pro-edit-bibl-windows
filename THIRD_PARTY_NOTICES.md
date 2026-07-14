@@ -14,6 +14,14 @@ direct platform-conditional port. The following original files were reviewed:
 - `engine/auto_cut.py`
 - `engine/config.py`
 - `engine/subtitle_polish.py`
+- `engine/transcript_export.py`
+- `engine/edit_diff.py`
+- `engine/acoustic_filler.py`
+- `engine/breath_reduce.py`
+- `engine/analyze_video.py`
+- `engine/shorts_xml.py`
+- `engine/sync_2cam.py`
+- `engine/mcam_xml.py`
 - `engine/html_report.py`
 - `README.md`
 - `requirements.txt`
@@ -28,6 +36,9 @@ Adapted concepts:
 - Repetition and false-start detection concepts.
 - Conservative/standard/aggressive preset concept.
 - HTML review report concept.
+- VTT/ASS/subtitle polish output concept.
+- Transcript export and edit-diff report concept.
+- Acoustic filler, breath detection, and noise-floor measurement concepts.
+- Shorts XML, 2-camera sync, and multicam XML concepts.
 
 MIT license notice from the original project is preserved in `LICENSE`.
-

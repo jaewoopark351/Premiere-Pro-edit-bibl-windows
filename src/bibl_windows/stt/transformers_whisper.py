@@ -15,7 +15,14 @@ class TransformersWhisperBackend:
     def __init__(self, model: str = "openai/whisper-large-v3") -> None:
         self.model = model
 
-    def transcribe(self, audio_path: Path, language: str = "ko", allow_cpu_fallback: bool = False) -> TranscriptResult:
+    def transcribe(
+        self,
+        audio_path: Path,
+        language: str = "ko",
+        allow_cpu_fallback: bool = False,
+        batch_size: int = 1,
+        chunk_length_s: float = 25.0,
+    ) -> TranscriptResult:
         try:
             import torch
             from transformers import pipeline
@@ -37,19 +44,36 @@ class TransformersWhisperBackend:
             torch_dtype = torch.float32
             pipeline_device = -1
 
-        asr = pipeline(
-            "automatic-speech-recognition",
-            model=self.model,
-            dtype=torch_dtype,
-            device=pipeline_device,
-        )
-        result = asr(
-            str(audio_path),
-            return_timestamps="word",
-            chunk_length_s=30,
-            batch_size=8,
-            generate_kwargs={"language": language, "task": "transcribe"},
-        )
+        try:
+            asr = pipeline(
+                "automatic-speech-recognition",
+                model=self.model,
+                dtype=torch_dtype,
+                device=pipeline_device,
+            )
+            result = asr(
+                str(audio_path),
+                return_timestamps="word",
+                chunk_length_s=max(5.0, float(chunk_length_s)),
+                batch_size=max(1, int(batch_size)),
+                generate_kwargs={"language": language, "task": "transcribe"},
+            )
+        except Exception as exc:
+            if cuda_available:
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+            message = str(exc)
+            if "out of memory" in message.lower():
+                raise SttRuntimeError(
+                    "CUDA ran out of memory during Whisper transcription. "
+                    "Close other GPU apps, keep `--stt-batch-size 1`, lower "
+                    "`--stt-chunk-seconds`, or use "
+                    "`--model openai/whisper-large-v3-turbo` for a smaller/faster model. "
+                    f"Original error: {message}"
+                ) from exc
+            raise SttRuntimeError(f"Whisper transcription failed: {message}") from exc
 
         words: list[TranscriptWord] = []
         chunks = result.get("chunks") or []

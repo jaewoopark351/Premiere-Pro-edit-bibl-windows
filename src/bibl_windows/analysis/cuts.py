@@ -6,8 +6,21 @@ import re
 from ..timeline.models import CutCandidate, TimeRange, TranscriptWord
 
 
-FILLER_WORDS = {"어", "음", "아", "엄", "그", "뭐", "막", "약간", "그니까", "그러니까", "이제"}
-SHORT_NOISE_WORDS = FILLER_WORDS | {"네", "예", "자"}
+FILLER_WORDS = {
+    "어",
+    "음",
+    "엄",
+    "아",
+    "그",
+    "저",
+    "좀",
+    "약간",
+    "그러니까",
+    "그니까",
+    "이제",
+    "막",
+}
+SHORT_NOISE_WORDS = FILLER_WORDS | {"어어", "음음", "아아"}
 
 
 def _norm(text: str) -> str:
@@ -143,4 +156,3 @@ def dedupe_candidates(candidates: list[CutCandidate]) -> list[CutCandidate]:
         else:
             out.append(candidate)
     return out
-

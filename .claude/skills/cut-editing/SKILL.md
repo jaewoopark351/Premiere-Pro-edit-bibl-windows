@@ -1,60 +1,68 @@
 ---
 name: cut-editing
-description: auto_cut.py 엔진으로 영상의 무음·숨소리·말더듬/중복·NG(재촬영)를 자동 제거하고(추임새는 기본 보존) 음성보정(디에서·자동 노이즈제거·-14 LUFS)까지 한 프리미어 시퀀스(XML)+오디오(WAV)+자막(SRT)을 생성한다. "컷편집", "무음제거", "러프컷", "NG 컷", "음성보정", "자동 편집" 요청 시 반드시 사용. 프리셋(보수/표준/공격).
+description: Windows/CUDA 포팅본의 bibl_windows CLI로 영상 러프컷 자료를 생성한다. STT, 무음/반복/false-start 기반 컷 후보, FCP7 XML, SRT, HTML 리포트, 선택적 clean WAV를 만든다. "컷편집", "무음제거", "러프컷", "자동 편집" 요청 시 사용.
 ---
 
 # 컷편집 실행
 
-`engine/auto_cut.py` 통합 엔진을 운용해 러프컷을 만든다. 엔진이 무거운 작업(무음감지·전사·**말더듬/중복·NG 제거**·숨소리 축소·**음성보정**·자막)을 결정적으로 처리하므로, **올바른 설정으로 실행하고 결과를 검증**하는 게 핵심.
+현재 Windows 포팅본의 권위 있는 실행 경로는 `engine/auto_cut.py`가 아니라 `src/bibl_windows` 패키지다. 원본 macOS 명령(`python3 engine/*.py`, `edit.sh`)을 그대로 사용하지 않는다.
 
-전문 편집자 기준 기본 동작: 무음 제거(끝음 보존) · 추임새 보존 · **말더듬/중복 제거** · **NG(재촬영) 컷 제거**(재촬영 신호어+재시도가 확인될 때만, 오탐 방지) · 숨소리 축소 · **음성보정**(de-esser + 노이즈플로어 자동측정 후 조건부 노이즈제거 + 압축 + -14 LUFS).
+## 0단계: dry-run
 
-## 0단계: 프리셋 자동 추천 (먼저)
-어떤 프리셋을 쓸지 모르면 먼저 영상을 분석한다:
-```bash
-python3 engine/analyze_video.py "원본영상.mp4"
+무거운 STT를 돌리기 전에 입력, 도구, 예상 산출물을 확인한다.
+
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli run "원본영상.mp4" --preset standard --dry-run
 ```
-길이·라우드니스·무음 비율을 측정해 보수/표준/공격을 추천하고 config 값까지 제안한다. 추천을 그대로 따르거나, 기획자(`20_plan.md`)가 정한 프리셋이 있으면 그것을 우선한다.
 
 ## 실행
 
-```bash
-# 프로젝트 루트에서 실행 (프리셋은 위 추천 또는 기획자 지정)
-python3 engine/auto_cut.py "원본영상.mp4" --preset 표준
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli run "원본영상.mp4" --preset standard
 ```
 
-- 73분 영상 기준 첫 실행 ~5분(전사 포함). 전사 캐시(`_words.json`) 있으면 ~2분.
-- **무거우니 백그라운드로 실행하고 완료를 기다린다.**
+정리 WAV까지 만들 때:
 
-## 프리셋 선택 기준 (2026-06 정책: 추임새는 기본 보존, 숨소리만 축소)
-| 프리셋 | 언제 | 효과 |
-|--------|------|------|
-| 보수 | 자연스러움 최우선, 잔잔한 인터뷰 | 무음도 최소한만. 추임새 살림 |
-| 표준 | 대부분의 토크/라이브 (기본) | 무음+숨소리+더듬 정리, **추임새(아·어·음·뭐) 살림** (~3~10% 제거) |
-| 공격 | 최대한 타이트, 군더더기 많은 영상 | 추임새·망설임까지 전부 제거(그래서·이제·근데까지) |
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli run "원본영상.mp4" --preset standard --clean-wav
+```
 
-세부 조정은 프로젝트 루트 `config.json`(`config.json.example` 참고)으로. 모델·임계값·필러목록 override.
+CUDA가 준비되지 않은 상태에서 기능만 확인할 때:
 
-## 산출물 (output/)
-- `<base>_cut.xml` — 프리미어 '불러오기' 하면 편집 가능한 시퀀스
-- `<base>_cut_audio.wav` — 정리된 -14 LUFS 오디오 (XML이 자동 연결)
-- `<base>_cut.srt` — 컷 정렬 자막 초안
-- `<base>_cut_report.txt` — 잘린 내용 전체(타임코드별)
-- `<base>_words.json` — 단어 단위 전사(리서처·자막이 재사용)
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli run "원본영상.mp4" --preset standard --limit-seconds 30 --allow-cpu-fallback
+```
 
-## 제1원칙: 자연스러움 > 최대 제거
-**추임새(아·어·음·뭐)는 말의 호흡이라 기본 보존한다**(비블 확정 — 다 자르면 AI가 읽는 것처럼 됨). 대신 숨소리(노이즈성 들숨/날숨)만 무음처럼 줄인다. 잘라낸 뒤 전체 맥락에서 부자연스러우면 그 컷은 실패. 제거율·개수만 보지 말고, 이어 봤을 때 뚝뚝 끊기지/숨 가쁘지/리듬 깨지지 않는지 본다.
+PowerShell 래퍼:
 
-## 검증 (실행 후 필수)
-1. **자연스러움 (최우선)** — `_cut_report.txt`의 '자연스러움 주의(컷 촘촘)' 목록 확인. 컷이 몰린 구간은 부자연 위험 → 디렉터에 보고하거나 한 단계 보수 프리셋 재실행.
-2. **제거율** — "총 제거 %" 확인. **표준 3~10% 정상**(추임새 살리므로 낮음), 12% 초과면 과제거 의심. 공격은 13~19% 정상.
-3. **과제거 점검** — `_cut_report.txt`에서 의미 있는 단어(접속사·핵심어)가 잘렸는지. 잘렸으면 보수적 프리셋 재실행.
-4. **프레임 무결성** — XML의 갭/겹침이 0인지(엔진이 '검증' 항목에 자동 표시).
+```powershell
+.\run.ps1 -InputPath "원본영상.mp4" -Preset standard -DryRun
+.\run.ps1 -InputPath "원본영상.mp4" -Preset standard -CleanWav
+```
 
-## 왜 이렇게 하는가
-- 엔진 실행은 결정적이라 매번 같은 결과 → 신뢰 가능. 하지만 영상마다 발화 습관이 달라 제거율이 튄다 → **결과 검증은 매번** 한다.
-- 과제거는 되돌리기 번거로우므로(원본 가장자리 드래그 필요), 의심되면 처음부터 보수적으로.
+## 현재 산출물
 
-## 한계 (알고 있을 것)
-- 어/음 같은 망설임 소리는 Whisper가 글자로 안 적어 일부만 잡힌다(망설임-빈틈 방식 보조). `HESITATION_MIN` 낮추면 더 잡지만 단어 꼬리 손상 위험.
-- 모델 바꾸면 `_words.json` 삭제 후 재실행.
+- `output\<base>_transcript.json` — Transformers Whisper 전사 결과
+- `output\<base>_stt_audio.wav` — STT용 추출 오디오
+- `output\<base>_cut_candidates.json` — 무음/반복/false-start 기반 후보
+- `output\<base>_cut.xml` — Premiere Pro에서 가져올 FCP7 XML
+- `output\<base>_cut.srt` — 컷 타임라인 기준 SRT
+- `output\<base>_report.html` — HTML 후보 리포트
+- `output\<base>_keep_ranges.json` — 삭제/유지 구간
+- `output\<base>_manifest.json` — 실행 메타데이터
+- `output\<base>_cut_audio.wav` — `--clean-wav` 사용 시 생성
+
+## 현재 제한
+
+- VTT/ASS, 강조 자막, transcript Markdown export, edit diff, acoustic filler, breath reduce, 멀티캠, 쇼츠는 아직 Windows CLI에 구현되지 않았다.
+- 원본의 `mlx-whisper` 대신 Transformers Whisper + PyTorch CUDA를 사용한다.
+- 완성 MP4를 렌더링하지 않는다. Premiere Pro에서 XML/SRT를 가져온 뒤 최종 내보내기를 한다.
+
+## 검증
+
+```powershell
+.\.venv\Scripts\python.exe -B -m pytest -q
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
+```
+
+Premiere Pro에서는 `output\<base>_cut.xml`을 가져와 미디어 경로가 offline이 아닌지 확인한다. 자막은 `output\<base>_cut.srt`를 별도로 가져온다.

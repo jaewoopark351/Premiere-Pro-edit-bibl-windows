@@ -15,6 +15,20 @@ def _tc(t: float) -> str:
 
 
 def write_report(path: Path, title: str, candidates: list[CutCandidate], summary: dict) -> None:
+    stats = [
+        ("Preset", str(summary.get("preset", "unknown"))),
+        ("Source duration", f"{float(summary.get('duration', 0.0)):.2f}s"),
+        ("Edited duration", f"{float(summary.get('edited_duration', 0.0)):.2f}s"),
+        ("Removed duration", f"{float(summary.get('removed_duration', 0.0)):.2f}s"),
+        ("Keep ranges", str(summary.get("keep_ranges", "unknown"))),
+        ("Deletion ranges", str(summary.get("deletion_ranges", "unknown"))),
+        ("Auto candidates", str(summary.get("auto_delete_candidates", 0))),
+        ("Review candidates", str(summary.get("review_candidates", 0))),
+    ]
+    stat_rows = "\n".join(
+        f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
+        for label, value in stats
+    )
     rows = "\n".join(
         "<tr>"
         f"<td>{_tc(c.start)} - {_tc(c.end)}</td>"
@@ -40,8 +54,12 @@ def write_report(path: Path, title: str, candidates: list[CutCandidate], summary
 </head>
 <body>
   <h1>{escape(title)}</h1>
-  <p>Preset: <code>{escape(str(summary.get('preset', 'unknown')))}</code></p>
-  <p>Duration: {summary.get('duration', 0):.2f}s, candidates: {len(candidates)}</p>
+  <h2>Summary</h2>
+  <table>
+    <tbody>{stat_rows}</tbody>
+  </table>
+  <h2>Cut Candidates</h2>
+  <p>Candidates: {len(candidates)}</p>
   <table>
     <thead><tr><th>Time</th><th>Reason</th><th>Confidence</th><th>Auto delete</th><th>Review</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -50,4 +68,3 @@ def write_report(path: Path, title: str, candidates: list[CutCandidate], summary
 </html>
 """
     path.write_text(html, encoding="utf-8", newline="\n")
-
