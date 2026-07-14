@@ -27,7 +27,7 @@ from .premiere.fcp7 import build_fcp7_xml
 from .reports.html import write_report
 from .runtime import RuntimeContext, RuntimeErrorWithHint
 from .stt.base import TranscriptResult, transcript_result_from_dict
-from .stt.transformers_whisper import SttRuntimeError, TransformersWhisperBackend
+from .stt.transformers_whisper import MAX_NEW_TOKENS, RETRY_CHUNK_SECONDS, SttRuntimeError, TransformersWhisperBackend
 from .subtitles.ass import write_ass
 from .subtitles.srt import group_words, polish_cues, write_srt
 from .subtitles.vtt import write_vtt
@@ -528,6 +528,7 @@ class WindowsEditPipeline:
             "segments": len(result.segments),
             "validation_issues": result.validation_issues,
             "warnings": result.warnings,
+            "truncation": result.diagnostics.get("truncation", {}),
         }
         _media, candidates, candidates_json = self.analyze_cuts(
             options.input_path,
@@ -682,6 +683,8 @@ def transcript_cache_metadata(options: PipelineOptions, transcribe_limit: float 
         "model": options.model,
         "language": options.language,
         "stt_chunk_seconds": options.stt_chunk_seconds,
+        "stt_max_new_tokens": MAX_NEW_TOKENS,
+        "stt_retry_chunk_seconds": RETRY_CHUNK_SECONDS,
         "initial_prompt": KOREAN_VERBATIM_PROMPT,
         "condition_on_previous_text": True,
         "transcription_limit_seconds": transcribe_limit,

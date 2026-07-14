@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+import wave
 
 from .base import TranscriptResult
 from .validation import validate_segments, validate_words
 from ..timeline.models import TranscriptSegment, TranscriptWord
 
 
+MAX_NEW_TOKENS = 256
+RETRY_CHUNK_SECONDS = 12.5
+EARLY_END_GRACE_SECONDS = 3.0
+
+
 class SttRuntimeError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class TruncationSuspicion:
+    suspected: bool
+    reason: str | None = None
+    retry_start: float | None = None
+    retry_end: float | None = None
 
 
 class TransformersWhisperBackend:
@@ -60,12 +75,23 @@ class TransformersWhisperBackend:
                 condition_on_previous_text=condition_on_previous_text,
                 warnings=warnings,
             )
-            result = asr(
-                str(audio_path),
-                return_timestamps="word",
-                chunk_length_s=max(5.0, float(chunk_length_s)),
+            initial_chunk_seconds = max(5.0, float(chunk_length_s))
+            result = run_asr(
+                asr,
+                audio_path,
+                chunk_length_s=initial_chunk_seconds,
                 batch_size=max(1, int(batch_size)),
                 generate_kwargs=generate_kwargs,
+            )
+            result, truncation_diagnostics = retry_if_truncated(
+                asr,
+                audio_path,
+                result,
+                initial_chunk_seconds=initial_chunk_seconds,
+                retry_chunk_seconds=RETRY_CHUNK_SECONDS,
+                batch_size=max(1, int(batch_size)),
+                generate_kwargs=generate_kwargs,
+                warnings=warnings,
             )
         except Exception as exc:
             if cuda_available:
@@ -110,7 +136,18 @@ class TransformersWhisperBackend:
             words=words,
             warnings=warnings,
             validation_issues=validation,
+            diagnostics={"truncation": truncation_diagnostics},
         )
+
+
+def run_asr(asr, audio_path: Path, chunk_length_s: float, batch_size: int, generate_kwargs: dict) -> dict:
+    return asr(
+        str(audio_path),
+        return_timestamps="word",
+        chunk_length_s=chunk_length_s,
+        batch_size=batch_size,
+        generate_kwargs=generate_kwargs,
+    )
 
 
 def build_generate_kwargs(
@@ -128,7 +165,7 @@ def build_generate_kwargs(
         # Music/singing chunks can make Whisper hallucinate far more tokens than any
         # real 25-30s speech chunk needs, which blows past 16GB of VRAM. Capping
         # max_new_tokens bounds that worst case without affecting normal speech.
-        "max_new_tokens": 256,
+        "max_new_tokens": MAX_NEW_TOKENS,
     }
     if not initial_prompt:
         return kwargs
@@ -150,6 +187,166 @@ def build_generate_kwargs(
     except Exception as exc:
         warnings.append(f"Whisper initial prompt was skipped: {exc}")
     return kwargs
+
+
+def retry_if_truncated(
+    asr,
+    audio_path: Path,
+    result: dict,
+    initial_chunk_seconds: float,
+    retry_chunk_seconds: float,
+    batch_size: int,
+    generate_kwargs: dict,
+    warnings: list[str],
+) -> tuple[dict, dict]:
+    audio_duration = wav_duration_seconds(audio_path)
+    chunks = result.get("chunks") or []
+    words = words_from_chunks(chunks, [])
+    suspicion = detect_truncation_suspicion(result, words, audio_duration, initial_chunk_seconds)
+    diagnostics = {
+        "suspected": suspicion.suspected,
+        "retried": False,
+        "initial_chunk_seconds": initial_chunk_seconds,
+        "retry_chunk_seconds": retry_chunk_seconds,
+        "reason": suspicion.reason,
+        "retry_start": suspicion.retry_start,
+        "retry_end": suspicion.retry_end,
+        "final_status": "not_suspected",
+    }
+    if not suspicion.suspected:
+        return result, diagnostics
+    warnings.append(
+        "Possible Whisper truncation detected"
+        + (f" ({suspicion.reason})" if suspicion.reason else "")
+        + "; retrying only the suspected audio range with a smaller chunk."
+    )
+    diagnostics["retried"] = True
+    retry_path = audio_path.with_name(audio_path.stem + "_truncation_retry.wav")
+    try:
+        write_wav_slice(audio_path, retry_path, float(suspicion.retry_start or 0.0), float(suspicion.retry_end or audio_duration))
+        retry_result = run_asr(
+            asr,
+            retry_path,
+            chunk_length_s=retry_chunk_seconds,
+            batch_size=batch_size,
+            generate_kwargs=generate_kwargs,
+        )
+        shifted_retry = shift_chunk_timestamps(retry_result, float(suspicion.retry_start or 0.0))
+        merged = merge_retry_result(result, shifted_retry, float(suspicion.retry_start or 0.0))
+        retry_words = words_from_chunks(shifted_retry.get("chunks") or [], [])
+        followup = detect_truncation_suspicion(merged, words_from_chunks(merged.get("chunks") or [], []), audio_duration, retry_chunk_seconds)
+        if followup.suspected and retry_words:
+            warnings.append("Whisper truncation is still suspected after retry; outputs were kept with a warning.")
+            diagnostics["final_status"] = "warning_after_retry"
+        elif retry_words:
+            diagnostics["final_status"] = "retry_success"
+        else:
+            warnings.append("Whisper truncation retry produced no additional timestamped words.")
+            diagnostics["final_status"] = "retry_no_words"
+        return merged, diagnostics
+    except Exception as exc:
+        warnings.append(f"Whisper truncation retry could not run: {exc}")
+        diagnostics["final_status"] = "retry_failed"
+        return result, diagnostics
+    finally:
+        try:
+            retry_path.unlink()
+        except OSError:
+            pass
+
+
+def detect_truncation_suspicion(
+    result: dict,
+    words: list[TranscriptWord],
+    audio_duration: float | None,
+    chunk_length_s: float,
+) -> TruncationSuspicion:
+    if not audio_duration or audio_duration <= 0:
+        return TruncationSuspicion(False)
+    if token_limit_reached(result, MAX_NEW_TOKENS):
+        retry_start = max(0.0, (words[-1].end if words else 0.0) - 0.5)
+        return TruncationSuspicion(True, "max_new_tokens", retry_start, audio_duration)
+    text = (result.get("text") or "").strip()
+    if not text or not words:
+        return TruncationSuspicion(False)
+    last_end = max(word.end for word in words)
+    early_gap = audio_duration - last_end
+    grace = max(EARLY_END_GRACE_SECONDS, min(8.0, chunk_length_s * 0.25))
+    if audio_duration >= chunk_length_s * 0.8 and early_gap > grace:
+        return TruncationSuspicion(True, "early_timestamp_end", max(0.0, last_end - 0.5), audio_duration)
+    return TruncationSuspicion(False)
+
+
+def token_limit_reached(result: dict, max_new_tokens: int) -> bool:
+    if bool(result.get("token_limit_reached") or result.get("max_new_tokens_reached")):
+        return True
+    if result.get("finish_reason") == "length":
+        return True
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    if bool(metadata.get("token_limit_reached") or metadata.get("max_new_tokens_reached")):
+        return True
+    for key in ("generated_tokens", "num_generated_tokens", "token_count"):
+        value = result.get(key, metadata.get(key))
+        if isinstance(value, int) and value >= max_new_tokens:
+            return True
+    return False
+
+
+def wav_duration_seconds(path: Path) -> float | None:
+    try:
+        with wave.open(str(path), "rb") as wav:
+            frames = wav.getnframes()
+            rate = wav.getframerate()
+            return frames / rate if rate else None
+    except (wave.Error, OSError, EOFError):
+        return None
+
+
+def write_wav_slice(source: Path, target: Path, start: float, end: float) -> None:
+    if end <= start:
+        raise ValueError(f"invalid retry audio range: {start:.3f}-{end:.3f}s")
+    with wave.open(str(source), "rb") as src:
+        rate = src.getframerate()
+        start_frame = max(0, int(start * rate))
+        end_frame = min(src.getnframes(), int(end * rate))
+        if end_frame <= start_frame:
+            raise ValueError(f"empty retry audio range: {start:.3f}-{end:.3f}s")
+        src.setpos(start_frame)
+        frames = src.readframes(end_frame - start_frame)
+        with wave.open(str(target), "wb") as dst:
+            dst.setnchannels(src.getnchannels())
+            dst.setsampwidth(src.getsampwidth())
+            dst.setframerate(rate)
+            dst.writeframes(frames)
+
+
+def shift_chunk_timestamps(result: dict, offset: float) -> dict:
+    shifted = dict(result)
+    shifted_chunks: list[dict] = []
+    for chunk in result.get("chunks") or []:
+        item = dict(chunk)
+        start, end = item.get("timestamp") or (None, None)
+        if start is not None and end is not None:
+            item["timestamp"] = (float(start) + offset, float(end) + offset)
+        shifted_chunks.append(item)
+    shifted["chunks"] = shifted_chunks
+    return shifted
+
+
+def merge_retry_result(original: dict, retry: dict, retry_start: float) -> dict:
+    original_chunks = [chunk for chunk in (original.get("chunks") or []) if chunk_starts_before(chunk, retry_start)]
+    retry_chunks = retry.get("chunks") or []
+    merged = dict(original)
+    merged["chunks"] = original_chunks + retry_chunks
+    merged["text"] = " ".join(part for part in ((original.get("text") or "").strip(), (retry.get("text") or "").strip()) if part)
+    merged["token_limit_reached"] = False
+    merged["max_new_tokens_reached"] = False
+    return merged
+
+
+def chunk_starts_before(chunk: dict, timestamp: float) -> bool:
+    start, _end = chunk.get("timestamp") or (None, None)
+    return start is None or float(start) < timestamp
 
 
 def words_from_chunks(chunks: list[dict], warnings: list[str]) -> list[TranscriptWord]:

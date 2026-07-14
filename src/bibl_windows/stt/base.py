@@ -19,6 +19,7 @@ class TranscriptResult:
     words: list[TranscriptWord]
     warnings: list[str] = field(default_factory=list)
     validation_issues: list[str] = field(default_factory=list)
+    diagnostics: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -40,6 +41,7 @@ class TranscriptResult:
             "words": [w.__dict__ for w in self.words],
             "warnings": self.warnings,
             "validation_issues": self.validation_issues,
+            "diagnostics": self.diagnostics,
         }
 
 
@@ -81,6 +83,7 @@ def transcript_result_from_dict(data: dict) -> TranscriptResult:
         words=words,
         warnings=[str(item) for item in data.get("warnings", [])],
         validation_issues=[str(item) for item in data.get("validation_issues", [])],
+        diagnostics=dict(data.get("diagnostics", {})),
     )
 
 
