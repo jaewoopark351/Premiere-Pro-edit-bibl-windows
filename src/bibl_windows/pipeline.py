@@ -16,6 +16,7 @@ from .analysis.acoustic import acoustic_filler_candidates
 from .artifacts import ArtifactManifest
 from .audio.breath import detect_breath_ranges
 from .audio.features import AudioFeatureSummary, measure_noise_floor
+from .claude_assets import write_claude_workspace
 from .ffmpeg_tools import detect_silence, extract_audio_for_stt, make_clean_wav
 from .exports.edit_diff import summarize_edit_diff, write_edit_diff
 from .exports.review import summarize_cut_review
@@ -87,6 +88,10 @@ class PipelineArtifacts:
     cut_review_json: Path | None = None
     rejected_xml: Path | None = None
     audio_loudness_json: Path | None = None
+    claude_context_json: Path | None = None
+    claude_context_md: Path | None = None
+    claude_cut_result_md: Path | None = None
+    claude_handoff_md: Path | None = None
     manifest_json: Path | None = None
 
 
@@ -179,6 +184,10 @@ class WindowsEditPipeline:
             "edit_diff_md": expected_path(f"{layout.stem}_edit_diff.md"),
             "cut_review_json": expected_path(f"{layout.stem}_cut_review.json"),
             "rejected_xml": expected_path(f"{layout.stem}_rejected.xml"),
+            "claude_context_json": expected_path(f"_workspace/{layout.stem}/00_claude_context.json"),
+            "claude_context_md": expected_path(f"_workspace/{layout.stem}/00_claude_context.md"),
+            "claude_cut_result_md": expected_path(f"_workspace/{layout.stem}/30_cut_result.md"),
+            "claude_handoff_md": expected_path(f"_workspace/{layout.stem}/99_director_handoff.md"),
             "manifest_json": expected_path(f"{layout.stem}_manifest.json"),
         }
         if options.clean_wav:
@@ -561,6 +570,25 @@ class WindowsEditPipeline:
         )
         for key, path in exported.__dict__.items():
             manifest.add(key, path)
+        claude_workspace = self.context.paths.output_path("_workspace", layout.stem, ".placeholder").parent
+        claude_files = write_claude_workspace(
+            self.context.claude,
+            claude_workspace,
+            input_path=str(options.input_path),
+            preset=options.preset_name,
+            mode=manifest.mode,
+            command=options.command or [],
+            files=manifest.files.copy(),
+            metadata=manifest.metadata.copy(),
+        )
+        for key, path in claude_files.items():
+            manifest.add(key, path)
+        manifest.metadata["claude"]["workspace"] = {
+            "dir": str(claude_workspace),
+            "context": str(claude_files["claude_context_md"]),
+            "cut_result": str(claude_files["claude_cut_result_md"]),
+            "handoff": str(claude_files["claude_handoff_md"]),
+        }
         manifest_path = layout.output_path(self.context, f"{layout.stem}_manifest.json")
         manifest.write(manifest_path)
         return PipelineArtifacts(
@@ -584,6 +612,10 @@ class WindowsEditPipeline:
             cut_review_json=exported.cut_review_json,
             rejected_xml=exported.rejected_xml,
             audio_loudness_json=exported.audio_loudness_json,
+            claude_context_json=claude_files["claude_context_json"],
+            claude_context_md=claude_files["claude_context_md"],
+            claude_cut_result_md=claude_files["claude_cut_result_md"],
+            claude_handoff_md=claude_files["claude_handoff_md"],
             manifest_json=manifest_path,
         )
 

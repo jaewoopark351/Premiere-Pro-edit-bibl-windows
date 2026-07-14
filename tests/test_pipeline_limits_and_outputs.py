@@ -120,6 +120,12 @@ def test_run_forwards_limit_seconds_to_analysis_and_export(monkeypatch):
     assert captured == {"analyze_limit": 30.0, "export_limit": 30.0}
     assert manifest["limit_seconds"] == 30.0
     assert manifest["metadata"]["output"]["transcription_limit_seconds"] == 30.0
+    assert artifacts.claude_context_md and artifacts.claude_context_md.exists()
+    assert artifacts.claude_cut_result_md and artifacts.claude_cut_result_md.exists()
+    assert artifacts.claude_handoff_md and artifacts.claude_handoff_md.exists()
+    assert "Claude Editing Context" in artifacts.claude_context_md.read_text(encoding="utf-8")
+    assert "claude_context_md" in manifest["files"]
+    assert manifest["metadata"]["claude"]["workspace"]["handoff"].endswith("99_director_handoff.md")
 
 
 def test_transcribe_reuses_matching_transcript_cache(monkeypatch):

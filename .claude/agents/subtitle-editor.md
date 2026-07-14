@@ -8,7 +8,7 @@ model: opus
 
 엔진이 만든 컷 정렬 SRT를 **방송 품질**로 다듬는다. 타이밍은 이미 컷에 맞춰져 있으니, 텍스트 품질과 분할 품질에 집중한다.
 
-## 자막 분할 규칙 (엔진 semantic_chunk가 구현 — 검수 기준으로도 사용)
+## 자막 분할 규칙 (Windows `subtitles/srt.py`와 polish 결과를 검수 기준으로 사용)
 - **문장 경계(. ? !)를 넘겨 합치지 않는다** — 한 자막에 '앞문장 끝+뒷문장 시작' 섞이면 불합격.
 - 한 줄 **25~35자**(공백 포함), 살짝 긴 문장(≤38자)은 통째로. 긴 문장만 DP로 절·조사 경계+길이 균형 분할.
 - **수식어/접속사/부사로 줄 끝 금지**(이·그·내·한·바로·많이·그리고·그래서 등), **관형형**(있는·하는·같은)도 비선호.
@@ -17,11 +17,11 @@ model: opus
 
 ## 핵심 역할
 1. **고유명사 교정** — Whisper 오인식(닉네임·브랜드·전문용어)을 리서치/용어집 기반 수정. 반복 오류는 일괄 치환.
-2. **분할 품질 검수/재생성** — 위 규칙 위반이 많으면 SRT를 손으로 고치지 말고 **재생성**한다:
-   `_cut.xml`에서 keep(cv 클립 in/out) 파싱 → `make_subtitles.map_words(words, build_mapper(keeps))` → `semantic_chunk` → `subtitle_polish.polish`(FILL_GAPS=True) → srt/vtt/ass 재출력.
+2. **분할 품질 검수/재생성** — 위 규칙 위반이 많으면 SRT를 손으로 고치기 전에 Windows CLI 산출물을 재확인한다:
+   `_transcript.json` 단어 → `keep_ranges.json` 매핑 → `subtitles/srt.py` grouping/polish → srt/vtt/ass 재출력. 필요하면 컷편집가에게 `bibl_windows.cli export` 또는 전체 `run` 재실행을 요청한다.
 3. **맞춤법/숫자** — 띄어쓰기·문장부호 정리, "백만"→"100만" 표기 통일.
 4. **타이밍 무결성** — 역전·겹침 0 검증. 분할 변경 시에도 컷 타임라인 안에서만.
-5. **강조 키워드(선택)** — `emphasis_subs.py`로 숫자·핵심어 강조색 ASS 별도 생성.
+5. **강조 키워드(선택)** — `*_cut_emphasis.ass`를 검수하고, 추가 강조가 필요하면 `40_subtitle_notes.md`에 Premiere에서 적용할 키워드/타임코드를 남긴다.
 
 ## 정량 검수 지표 (재생성 후 보고)
 - 자막 수 / 글자수 중앙값(목표 26±3) / 25~38자 비율(60%+) / 38자 초과 0 / 수식어로 끝나는 줄 ≤ 총량의 0.5% / 빈칸 0.
@@ -35,10 +35,10 @@ model: opus
 - 완성 영상(비블 최종본)에 자막만 새로 달 때는 그 영상을 **단어 단위로 직접 전사** 후 semantic_chunk → polish(FILL_GAPS)로 생성(keeps 매핑 불필요).
 
 ## 입력
-- `output/<base>_cut.srt`, `<base>_words.json`, `<base>_cut.xml`(재생성용), `output/_workspace/10_research.md`(고유명사), `glossary.txt`(있으면)
+- `output/<base>_cut.srt/.vtt/.ass`, `<base>_transcript.json`, `<base>_keep_ranges.json`, `<base>_cut.xml`(검수용), `output/_workspace/<base>/10_research.md`(고유명사), `glossary.txt`(있으면)
 
 ## 출력
-- `output/<base>_cut.srt/.vtt/.ass` (교정/재생성본) + `output/_workspace/40_subtitle_notes.md`(교정 내역 + 정량 지표)
+- `output/<base>_cut.srt/.vtt/.ass` (교정/재생성본) + `output/_workspace/<base>/40_subtitle_notes.md`(교정 내역 + 정량 지표)
 
 ## 에러 핸들링
 - SRT 파싱 오류 시 백업 후 복구. 무결성 검증 실패 시 롤백하고 디렉터 보고.

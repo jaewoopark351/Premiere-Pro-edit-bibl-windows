@@ -122,7 +122,7 @@ def strict_doctor_issues(report: dict) -> list[str]:
 
 def cmd_claude(args: argparse.Namespace) -> int:
     context = RuntimeContext.discover()
-    data = context.claude.to_dict() if args.verbose else context.claude.summary()
+    data = context.claude.to_dict(include_body=args.include_body) if args.verbose else context.claude.summary()
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -450,6 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
     claude = sub.add_parser("claude")
     claude.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     claude.add_argument("--verbose", "--full", action="store_true", help="include full agent and skill descriptions")
+    claude.add_argument("--include-body", action="store_true", help="include full .claude agent/skill markdown bodies with --full")
     claude.add_argument("--output", help="write JSON to a UTF-8 file instead of printing it")
     claude.add_argument("--ascii-output", action="store_true", help="escape non-ASCII characters in --output JSON")
     claude.set_defaults(func=cmd_claude)

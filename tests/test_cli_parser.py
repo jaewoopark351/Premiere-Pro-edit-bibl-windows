@@ -135,6 +135,12 @@ def test_parser_accepts_claude_verbose_alias():
     assert args.verbose
 
 
+def test_parser_accepts_claude_include_body():
+    args = build_parser().parse_args(["claude", "--full", "--include-body"])
+    assert args.verbose
+    assert args.include_body
+
+
 def test_parser_accepts_claude_output_path():
     args = build_parser().parse_args(["claude", "--full", "--output", "output/claude.json"])
     assert args.verbose

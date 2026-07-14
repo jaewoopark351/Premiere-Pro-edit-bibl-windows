@@ -8,8 +8,10 @@ description: 리서치 결과를 영상 편집 설계도로 바꾼다. 인트로
 리서처의 "무엇을 남길지"를 "어떤 순서·속도·강조로 보여줄지"로 옮기는 **편집 설계도**를 만든다.
 
 ## 입력
-- `output/_workspace/10_research.md`(핵심메시지·하이라이트·삭제추천·챕터)
-- `00_director_brief.md`(방향)
+- `output/_workspace/<base>/00_claude_context.md`(실제 입력/산출물/에이전트 맵)
+- `output/_workspace/<base>/10_research.md`(핵심메시지·하이라이트·삭제추천·챕터)
+- `output/_workspace/<base>/00_director_brief.md`(방향)
+- `output/<base>_cut.srt`, `output/<base>_report.html`, `output/<base>_cut_review.json`
 
 ## 기획 4종
 
@@ -24,7 +26,7 @@ description: 리서치 결과를 영상 편집 설계도로 바꾼다. 인트로
 - 차분한 강의/설명 → 보수
 - 일반 토크/라이브 → 표준
 - 군더더기 많고 빠른 전개 원함 → 공격
-**반드시 프리셋 이름을 명시.** 추가 미세조정은 config 키로 (예: "`HESITATION_MIN`을 0.3으로").
+**반드시 프리셋 이름을 명시.** Windows CLI에서 실제로 받는 이름(`conservative`, `standard`, `aggressive`)과 옵션을 사용한다. 불확실한 config 키를 지어내지 말고 `run --help` 또는 `config/presets.json` 기준으로 적는다.
 
 ### 4. 강조 / B롤 샷리스트 (타임코드)
 편집자가 프리미어에서 작업할 구조화된 메모:
@@ -43,7 +45,7 @@ description: 리서치 결과를 영상 편집 설계도로 바꾼다. 인트로
 콜드 오픈 훅을 실제 문장으로. 구조: ① 결론/충격 한 방 → ② "왜냐하면"의 떡밥 → ③ "끝까지 보면 ~" 약속. 리서치 인트로후보의 발화를 다듬어 쓴다.
 
 ## 출력
-`output/_workspace/20_plan.md`:
+`output/_workspace/<base>/20_plan.md`:
 ```
 ## 인트로 훅
 00:12:30~00:12:48 "..." 를 0초로 당김

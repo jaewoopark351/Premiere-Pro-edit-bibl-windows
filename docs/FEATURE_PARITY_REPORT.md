@@ -36,7 +36,7 @@
 | STT | `mlx-whisper` | Transformers Whisper + PyTorch CUDA |
 | Premiere 연동 | FCP7 XML 파일 생성 | FCP7 XML 파일 생성 |
 | 렌더링 | Premiere 수동 렌더 | Premiere JSX 생성/실행기 제공, 실제 렌더 결과는 수동 검증 |
-| Claude 자산 | `.claude` 문서 중심 | `.claude` 발견, doctor/manifest에 기록 |
+| Claude 자산 | `.claude` 문서 중심 | `.claude` 본문 발견, doctor/manifest 기록, `output/_workspace/<base>/` 브리핑/핸드오프 생성 |
 
 ## 현재 Windows 출력
 
@@ -55,6 +55,9 @@
 - `*_audio_loudness.json` 조건부
 - `*_breath_ranges.json` 조건부
 - `*_manifest.json`
+- `output/_workspace/<base>/00_claude_context.json/.md`
+- `output/_workspace/<base>/30_cut_result.md`
+- `output/_workspace/<base>/99_director_handoff.md`
 
 ## 기능 비교 표
 
@@ -98,7 +101,7 @@
 | 멀티캠 XML | `mcam_xml.py` | `multicam/xml.py`, `cli multicam-xml` | 예 | 검토용 구현 | explicit offset/multi-track XML | 큼 | multicam tests |
 | 자동 카메라 전환 | 원본 별도 로직 일부 | `multicam/switching.py`, `cli auto-multicam-xml` | 예 | 검토용 구현 | keep range를 switch interval로 나누는 보수적 round-robin 휴리스틱 | 큼 | multicam switching tests, XML parse smoke |
 | Premiere 자동 렌더링 | 없음/수동 | `premiere/automation.py`, `cli premiere-script`, `cli premiere-launch` | 예 | 검토용 구현 | JSX 생성/실행기 제공. 실제 Premiere/Media Encoder 성공 여부는 GUI 환경 수동 검증 필요 | 큼 | JSX generation tests |
-| Claude agent/skill 연동 | `.claude/*` | `claude_assets.py`, `cli doctor`, manifest | 예 | 부분 구현 | 자산 발견/기록은 되지만 모든 agent 문구가 Windows 명령과 완전 동기화되지는 않음 | 쉬움 | claude asset tests |
+| Claude agent/skill 연동 | `.claude/*`, 원본 README의 Claude Code agent team 설명 | `claude_assets.py`, `cli claude`, `pipeline.py`, manifest, `output/_workspace/<base>/` | 예 | 부분 구현 | `.claude` 본문을 읽고 Claude Code용 context/cut result/handoff를 생성하지만, 실제 subagent 실행과 Premiere GUI import는 사용자가 Claude Code/Premiere에서 수행해야 함 | 중간 | claude asset tests, mocked E2E workspace tests |
 
 ## 이번 검수에서 수정한 핵심 문제
 
@@ -123,6 +126,8 @@
 - 모든 자동 삭제 후보의 단어 경계 침범 보호를 추가했다.
 - `*_cut_review.json`과 `*_rejected.xml`을 추가해 버린 컷 검토 데이터를 Premiere XML로도 확인할 수 있게 했다.
 - clean WAV 생성 시 `*_audio_loudness.json`에 원본/clean WAV loudnorm 측정값을 기록한다.
+- `.claude` agent/skill 본문을 읽고 `cli claude --full --include-body`로 내보낼 수 있게 했다.
+- 파이프라인 실행 시 `output/_workspace/<base>/00_claude_context.md`, `30_cut_result.md`, `99_director_handoff.md`를 자동 생성해 Claude Code가 원본처럼 파일 기반 편집팀 워크플로우를 이어갈 수 있게 했다.
 
 ## 권장 구현 순서 상태
 
@@ -170,6 +175,8 @@
 - shorts/multicam helper
 - auto multicam switching XML
 - Premiere automation JSX generation
+- Claude asset body export
+- Claude workspace context/cut-result/handoff generation in mocked E2E
 
 수동 검증 필요:
 

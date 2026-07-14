@@ -107,6 +107,9 @@ def test_mocked_stt_e2e_generates_limited_xml_srt_and_manifest(monkeypatch):
 
     assert artifacts.xml and artifacts.xml.exists()
     assert artifacts.srt and artifacts.srt.exists()
+    assert artifacts.claude_context_md and artifacts.claude_context_md.exists()
+    assert artifacts.claude_cut_result_md and artifacts.claude_cut_result_md.exists()
+    assert artifacts.claude_handoff_md and artifacts.claude_handoff_md.exists()
     assert artifacts.manifest_json and artifacts.manifest_json.exists()
     ET.parse(artifacts.xml)
     candidates = read_json(artifacts.cut_candidates_json)
@@ -116,6 +119,8 @@ def test_mocked_stt_e2e_generates_limited_xml_srt_and_manifest(monkeypatch):
     assert candidates["analysis_duration"] == 1.0
     assert keep_ranges["timeline_duration"] == 1.0
     assert manifest["limit_seconds"] == 1.0
+    assert "claude_context_md" in manifest["files"]
+    assert manifest["metadata"]["claude"]["workspace"]["dir"].endswith(str(Path("_workspace") / media.stem))
     # Premiere's FCP7 importer needs literal (non-percent-encoded) Korean text
     # in pathurl to auto-locate media; see paths.premiere_fcp7_pathurl.
     assert "한글" in xml_text
