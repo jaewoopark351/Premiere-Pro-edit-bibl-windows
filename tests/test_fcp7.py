@@ -34,3 +34,34 @@ def test_fcp7_xml_parses_and_escapes_media_uri_special_characters():
     assert "%23" in pathurl.text
     assert "%26" in pathurl.text
     assert "%25" in pathurl.text
+
+
+def test_fcp7_uses_clean_wav_audio_link():
+    media = MediaInfo(
+        path=Path(r"C:\테스트 영상\source.mp4"),
+        duration=5,
+        video=VideoStream(index=0, codec_name="h264", width=1280, height=720, fps=30, fps_text="30/1"),
+        audio=AudioStream(index=1, codec_name="aac", sample_rate=48000, channels=2),
+    )
+
+    xml = build_fcp7_xml(media, [TimeRange(0, 1)], "clean audio", Path(r"C:\테스트 영상\source_cut_audio.wav"))
+
+    root = ET.fromstring(xml)
+    pathurls = [node.text for node in root.findall(".//pathurl")]
+    assert any(text and text.endswith("source_cut_audio.wav") for text in pathurls)
+    assert "<file id=\"file-audio\">" in xml
+
+
+def test_fcp7_ntsc_frame_rates_have_ntsc_rate_and_expected_frames():
+    for fps, timebase in ((24000 / 1001, "24"), (30000 / 1001, "30"), (60000 / 1001, "60")):
+        media = MediaInfo(
+            path=Path(r"D:\video\clip.mp4"),
+            duration=10,
+            video=VideoStream(index=0, codec_name="h264", width=1920, height=1080, fps=fps, fps_text=f"{timebase}000/1001"),
+            audio=AudioStream(index=1, codec_name="aac", sample_rate=48000, channels=2),
+        )
+
+        xml = build_fcp7_xml(media, [TimeRange(0, 10)], f"{fps} fps")
+
+        assert f"<timebase>{timebase}</timebase><ntsc>TRUE</ntsc>" in xml
+        assert f"<duration>{round(10 * fps)}</duration>" in xml

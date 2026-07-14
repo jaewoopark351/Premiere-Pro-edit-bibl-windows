@@ -57,6 +57,17 @@ def test_run_parser_accepts_phase_2_3_options():
     assert args.no_extra_exports
 
 
+def test_run_parser_defaults_to_original_audio_cleanup():
+    args = build_parser().parse_args(["run", "sample.mp4"])
+    assert args.clean_wav is True
+    assert args.audio_preset == "natural"
+
+
+def test_run_parser_can_disable_default_clean_wav():
+    args = build_parser().parse_args(["run", "sample.mp4", "--no-clean-wav"])
+    assert args.clean_wav is False
+
+
 def test_run_parser_accepts_output_controls():
     args = build_parser().parse_args(
         ["run", "sample.mp4", "--output-dir", "session 1", "--output-name", "custom", "--overwrite"]

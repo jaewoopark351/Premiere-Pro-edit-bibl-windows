@@ -75,7 +75,15 @@ def test_mocked_stt_e2e_generates_limited_xml_srt_and_manifest(monkeypatch):
     paths = ProjectPaths(root)
     context = RuntimeContext(paths=paths, tools=RuntimeTools.discover(), claude=ClaudeProjectAssets.discover(paths))
 
-    def fake_transcribe(self, audio_path, language="ko", allow_cpu_fallback=False, batch_size=1, chunk_length_s=25.0):
+    def fake_transcribe(
+        self,
+        audio_path,
+        language="ko",
+        allow_cpu_fallback=False,
+        batch_size=1,
+        chunk_length_s=25.0,
+        **_kwargs,
+    ):
         words = [
             TranscriptWord(0.10, 0.35, "안녕", 0.99),
             TranscriptWord(0.40, 0.70, "테스트", 0.99),

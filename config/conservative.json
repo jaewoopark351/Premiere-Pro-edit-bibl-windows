@@ -13,7 +13,15 @@
     "repeat_gap": 0.45,
     "word_pad": 0.04,
     "false_start_ratio": 0.78,
+    "hesitation_min": 0.7,
+    "hesitation_pad": 0.06,
     "short_utterance_max_duration": 0.35
+  },
+  "policy": {
+    "remove_fillers": false,
+    "remove_hesitation": false,
+    "acoustic_filler": false,
+    "auto_delete_reasons": []
   },
   "stt": {
     "model": "openai/whisper-large-v3",
@@ -21,4 +29,3 @@
     "allow_cpu_fallback": false
   }
 }
-

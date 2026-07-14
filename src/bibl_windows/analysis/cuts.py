@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from dataclasses import replace
 
 from ..timeline.models import CutCandidate, TimeRange, TranscriptWord
 
@@ -21,6 +22,13 @@ FILLER_WORDS = {
     "막",
 }
 SHORT_NOISE_WORDS = FILLER_WORDS | {"어어", "음음", "아아"}
+AGGRESSIVE_AUTO_REASONS = {
+    "short_meaningless_utterance",
+    "hesitation_silence",
+    "acoustic_filler",
+    "false_start_prefix",
+    "false_start_repeat",
+}
 
 
 def _norm(text: str) -> str:
@@ -166,9 +174,10 @@ def false_start_candidates(words: list[TranscriptWord], max_gap: float, pad: flo
 
 def short_meaningless_candidates(words: list[TranscriptWord], max_duration: float, pad: float) -> list[CutCandidate]:
     out: list[CutCandidate] = []
-    for word in words:
+    for idx, word in enumerate(words):
         token = _norm(word.text)
         if token in SHORT_NOISE_WORDS and word.end - word.start <= max_duration:
+            protected_context = is_contextual_filler(token, words, idx)
             out.append(
                 CutCandidate(
                     start=max(0.0, word.start - pad),
@@ -177,10 +186,84 @@ def short_meaningless_candidates(words: list[TranscriptWord], max_duration: floa
                     confidence=0.65,
                     auto_delete=False,
                     requires_review=True,
-                    metadata={"text": word.text},
+                    metadata={"text": word.text, "protected_context": protected_context},
                 )
             )
     return out
+
+
+def hesitation_candidates(
+    silences: list[TimeRange],
+    words: list[TranscriptWord],
+    min_duration: float,
+    pad: float,
+) -> list[CutCandidate]:
+    if not silences or len(words) < 2:
+        return []
+    out: list[CutCandidate] = []
+    ordered = sorted(words, key=lambda word: (word.start, word.end))
+    for prev, nxt in zip(ordered, ordered[1:]):
+        gap_start = prev.end
+        gap_end = nxt.start
+        if gap_end - gap_start < min_duration:
+            continue
+        for silence in silences:
+            start = max(gap_start, silence.start) + pad
+            end = min(gap_end, silence.end) - pad
+            if end - start >= min_duration:
+                out.append(
+                    CutCandidate(
+                        start=max(0.0, start),
+                        end=end,
+                        reason="hesitation_silence",
+                        confidence=0.7,
+                        auto_delete=False,
+                        requires_review=True,
+                        metadata={"source": "speech_gap", "previous": prev.text, "next": nxt.text},
+                    )
+                )
+    return out
+
+
+def apply_preset_policy(candidates: list[CutCandidate], preset_name: str, preset: dict) -> list[CutCandidate]:
+    policy = preset.get("policy", {}) if isinstance(preset, dict) else {}
+    auto_reasons = set(policy.get("auto_delete_reasons", []))
+    if preset_name == "aggressive":
+        auto_reasons |= AGGRESSIVE_AUTO_REASONS
+    if not auto_reasons:
+        return candidates
+    out: list[CutCandidate] = []
+    for candidate in candidates:
+        protected_context = bool(candidate.metadata.get("protected_context"))
+        if candidate.reason in auto_reasons and not protected_context:
+            out.append(replace(candidate, auto_delete=True, requires_review=False))
+        else:
+            out.append(candidate)
+    return out
+
+
+def is_contextual_filler(token: str, words: list[TranscriptWord], idx: int) -> bool:
+    if token != "좀":
+        return False
+    if idx + 1 >= len(words):
+        return True
+    nxt = _norm(words[idx + 1].text)
+    degree_stems = (
+        "더",
+        "많",
+        "많이",
+        "빨리",
+        "천천히",
+        "조용",
+        "길",
+        "짧",
+        "크",
+        "작",
+        "깊",
+        "자주",
+        "오래",
+    )
+    return not nxt or nxt.startswith(degree_stems)
 
 
 def dedupe_candidates(candidates: list[CutCandidate]) -> list[CutCandidate]:

@@ -4,8 +4,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .analysis.cuts import (
+    apply_preset_policy,
     dedupe_candidates,
     false_start_candidates,
+    hesitation_candidates,
     repeated_speech_candidates,
     short_meaningless_candidates,
     silence_candidates,
@@ -35,6 +37,12 @@ from .timeline.protection import protected_candidate_delete_ranges
 from .video.analyze import measure_loudness
 
 
+KOREAN_VERBATIM_PROMPT = (
+    "한국어 원문 그대로 받아쓰기. 어, 음, 엄, 아, 그, 저, 좀, 약간, "
+    "그러니까, 그니까, 이제, 막 같은 필러와 반복 발화를 삭제하거나 고치지 말고 그대로 전사."
+)
+
+
 @dataclass(frozen=True)
 class PipelineOptions:
     input_path: Path
@@ -46,8 +54,8 @@ class PipelineOptions:
     limit_seconds: float | None = None
     stt_limit_seconds: float | None = None
     allow_cpu_fallback: bool = False
-    clean_wav: bool = False
-    audio_preset: str = "standard"
+    clean_wav: bool = True
+    audio_preset: str = "natural"
     extra_exports: bool = True
     advanced_audio_analysis: bool = True
     output_dir: str | None = None
@@ -126,6 +134,8 @@ class WindowsEditPipeline:
                 allow_cpu_fallback=options.allow_cpu_fallback,
                 batch_size=options.stt_batch_size,
                 chunk_length_s=options.stt_chunk_seconds,
+                initial_prompt=KOREAN_VERBATIM_PROMPT,
+                condition_on_previous_text=True,
             )
         except SttRuntimeError as exc:
             fallback_hint = (
@@ -261,6 +271,7 @@ class WindowsEditPipeline:
         audio_analysis: dict = {}
         if transcript_json and transcript_json.exists():
             words = limit_words(load_transcript_words(transcript_json), analysis_duration)
+            policy = preset.get("policy", {})
             candidates += repeated_speech_candidates(words, float(cut_cfg["repeat_gap"]), float(cut_cfg["word_pad"]))
             candidates += false_start_candidates(
                 words,
@@ -273,6 +284,13 @@ class WindowsEditPipeline:
                 float(cut_cfg["short_utterance_max_duration"]),
                 float(cut_cfg["word_pad"]),
             )
+            if policy.get("remove_hesitation"):
+                candidates += hesitation_candidates(
+                    silences,
+                    words,
+                    float(cut_cfg.get("hesitation_min", 0.55)),
+                    float(cut_cfg.get("hesitation_pad", cut_cfg["word_pad"])),
+                )
             if advanced_audio_analysis and stt_audio_path and stt_audio_path.exists():
                 noise = measure_noise_floor(stt_audio_path)
                 breath_ranges = detect_breath_ranges(stt_audio_path, words, noise, analysis_duration)
@@ -293,7 +311,7 @@ class WindowsEditPipeline:
                     "noise_floor": noise.to_dict(),
                     "breath_ranges": [item.__dict__ for item in breath_ranges],
                 }
-        candidates = dedupe_candidates(candidates)
+        candidates = dedupe_candidates(apply_preset_policy(candidates, preset_name, preset))
         out = layout.output_path(self.context, f"{layout.stem}_cut_candidates.json")
         write_json(
             out,
@@ -563,6 +581,9 @@ class WindowsEditPipeline:
             transcript_csv=exported.transcript_csv,
             edit_diff_json=exported.edit_diff_json,
             edit_diff_md=exported.edit_diff_md,
+            cut_review_json=exported.cut_review_json,
+            rejected_xml=exported.rejected_xml,
+            audio_loudness_json=exported.audio_loudness_json,
             manifest_json=manifest_path,
         )
 
@@ -662,6 +683,8 @@ def transcript_cache_metadata(options: PipelineOptions, transcribe_limit: float 
         "model": options.model,
         "language": options.language,
         "stt_chunk_seconds": options.stt_chunk_seconds,
+        "initial_prompt": KOREAN_VERBATIM_PROMPT,
+        "condition_on_previous_text": True,
         "transcription_limit_seconds": transcribe_limit,
     }
 

@@ -15,3 +15,14 @@ def test_repeated_word_deletion_is_not_speech_protected():
     ranges = protected_candidate_delete_ranges(candidates, words, total=5, fps=30, margin=0.1)
     assert ranges
     assert ranges[0].start == 1.0
+
+
+def test_non_silence_deletion_protects_neighbor_word_boundary():
+    candidates = [CutCandidate(1.0, 1.35, "false_start_prefix", 0.8, True, False)]
+    words = [
+        TranscriptWord(1.0, 1.1, "bad"),
+        TranscriptWord(1.25, 1.55, "keep"),
+    ]
+    ranges = protected_candidate_delete_ranges(candidates, words, total=5, fps=30, margin=0.05)
+
+    assert ranges == [CutCandidate(1.0, 1.2, "x", 1.0, True, False).range()]

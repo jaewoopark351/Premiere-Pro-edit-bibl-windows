@@ -6,11 +6,12 @@ param(
   [double]$SmokeSeconds = 0,
   [int]$SttBatchSize = 1,
   [double]$SttChunkSeconds = 25,
-  [ValidateSet("standard","natural","podcast")][string]$AudioPreset = "standard",
+  [ValidateSet("standard","natural","podcast")][string]$AudioPreset = "natural",
   [string]$OutputDir,
   [string]$OutputName,
   [switch]$AllowCpuFallback,
   [switch]$CleanWav,
+  [switch]$NoCleanWav,
   [switch]$NoExtraExports,
   [switch]$NoAdvancedAudioAnalysis,
   [switch]$NoTranscriptCache,
@@ -46,6 +47,7 @@ if ($OutputDir) { $ArgsList += @("--output-dir", "$OutputDir") }
 if ($OutputName) { $ArgsList += @("--output-name", "$OutputName") }
 if ($AllowCpuFallback) { $ArgsList += "--allow-cpu-fallback" }
 if ($CleanWav) { $ArgsList += "--clean-wav" }
+if ($NoCleanWav) { $ArgsList += "--no-clean-wav" }
 if ($NoExtraExports) { $ArgsList += "--no-extra-exports" }
 if ($NoAdvancedAudioAnalysis) { $ArgsList += "--no-advanced-audio-analysis" }
 if ($NoTranscriptCache) { $ArgsList += "--no-transcript-cache" }

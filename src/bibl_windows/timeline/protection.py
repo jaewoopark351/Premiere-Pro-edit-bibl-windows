@@ -28,8 +28,24 @@ def protected_candidate_delete_ranges(
                 pieces = subtract_range_list(pieces, protected)
                 if not pieces:
                     break
+        else:
+            for word_range in speech:
+                if not cuts_through_word_boundary(candidate.range(), word_range):
+                    continue
+                protected = TimeRange(max(0.0, word_range.start - margin), min(total, word_range.end + margin))
+                pieces = subtract_range_list(pieces, protected)
+                if not pieces:
+                    break
         ranges.extend(pieces)
     return merge_ranges(ranges, total=total, fps=fps)
+
+
+def cuts_through_word_boundary(candidate: TimeRange, word: TimeRange) -> bool:
+    if not candidate.overlaps(word):
+        return False
+    start_inside = word.start < candidate.start < word.end
+    end_inside = word.start < candidate.end < word.end
+    return start_inside or end_inside
 
 
 def subtract_range_list(ranges: list[TimeRange], blocked: TimeRange) -> list[TimeRange]:

@@ -85,5 +85,14 @@ def transcript_result_from_dict(data: dict) -> TranscriptResult:
 
 
 class SttBackend(Protocol):
-    def transcribe(self, audio_path: Path, language: str, allow_cpu_fallback: bool) -> TranscriptResult:
+    def transcribe(
+        self,
+        audio_path: Path,
+        language: str,
+        allow_cpu_fallback: bool,
+        batch_size: int = 1,
+        chunk_length_s: float = 25.0,
+        initial_prompt: str | None = None,
+        condition_on_previous_text: bool = True,
+    ) -> TranscriptResult:
         ...
