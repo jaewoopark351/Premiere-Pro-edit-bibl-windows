@@ -5,6 +5,7 @@ import wave
 from bibl_windows.stt.transformers_whisper import (
     detect_truncation_suspicion,
     retry_if_truncated,
+    transcribe_long_form,
     build_generate_kwargs,
     words_from_chunks,
 )
@@ -136,6 +137,50 @@ def test_retry_if_truncated_retries_only_suspected_wav_range_with_smaller_chunk(
     assert diagnostics["retry_chunk_seconds"] == 12.5
     assert diagnostics["final_status"] == "retry_success"
     assert not calls[0]["audio_path"].exists()
+
+
+def test_transcribe_long_form_splits_into_independent_segments_and_merges_timestamps():
+    # Long recordings must not be transcribed in a single asr() call: HF's
+    # chunked long-form generate() accumulates GPU memory across chunks and
+    # eventually OOMs regardless of the max_new_tokens cap. Splitting into
+    # independent segments (each its own asr() call) bounds peak memory.
+    root = Path(".test_tmp_manual") / f"stt-segments-{uuid4().hex}"
+    root.mkdir(parents=True, exist_ok=False)
+    wav_path = root / "long.wav"
+    write_silent_wav(wav_path, duration=25.0)
+    calls = []
+
+    class FakeAsr:
+        def __call__(self, audio_path, return_timestamps, chunk_length_s, batch_size, generate_kwargs):
+            calls.append(Path(audio_path))
+            index = len(calls)
+            return {
+                "text": f"segment{index}",
+                "chunks": [{"text": f"segment{index}", "timestamp": (1.0, 2.0)}],
+            }
+
+    result, diagnostics = transcribe_long_form(
+        FakeAsr(),
+        wav_path,
+        initial_chunk_seconds=25.0,
+        retry_chunk_seconds=12.5,
+        batch_size=1,
+        generate_kwargs={"max_new_tokens": 256},
+        warnings=[],
+        segment_seconds=10.0,
+    )
+
+    assert len(calls) == 3
+    assert all(not call.exists() for call in calls)
+    assert not wav_path.with_name("long_segment_000.wav").exists()
+    words = words_from_chunks(result["chunks"], [])
+    assert [(word.text, round(word.start, 1), round(word.end, 1)) for word in words] == [
+        ("segment1", 1.0, 2.0),
+        ("segment2", 11.0, 12.0),
+        ("segment3", 21.0, 22.0),
+    ]
+    assert diagnostics["segment_seconds"] == 10.0
+    assert len(diagnostics["segments"]) == 3
 
 
 def write_silent_wav(path: Path, duration: float, sample_rate: int = 16000) -> None:

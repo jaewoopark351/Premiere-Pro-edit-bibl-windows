@@ -12,6 +12,17 @@ from ..timeline.models import TranscriptSegment, TranscriptWord
 MAX_NEW_TOKENS = 256
 RETRY_CHUNK_SECONDS = 12.5
 EARLY_END_GRACE_SECONDS = 3.0
+# HF's chunked long-form generate() does not release the per-chunk
+# cross-attention tensors it builds for word timestamps until the whole
+# asr() call returns: GPU memory grows with the number of internal chunks
+# processed inside a single call. A 240s segment (~14 chunks) still OOM'd on
+# a real heavy-hallucination recording even as the very first, freshly
+# loaded call, so segments are clamped to at most one Whisper chunk
+# (`initial_chunk_seconds`) — that guarantees no within-call accumulation
+# across multiple chunks, regardless of how bad a given recording's
+# hallucination behavior is. This value is only a fallback for callers that
+# do not pass their own chunk length.
+SEGMENT_SECONDS = 240.0
 
 
 class SttRuntimeError(RuntimeError):
@@ -76,17 +87,9 @@ class TransformersWhisperBackend:
                 warnings=warnings,
             )
             initial_chunk_seconds = max(5.0, float(chunk_length_s))
-            result = run_asr(
+            result, truncation_diagnostics = transcribe_long_form(
                 asr,
                 audio_path,
-                chunk_length_s=initial_chunk_seconds,
-                batch_size=max(1, int(batch_size)),
-                generate_kwargs=generate_kwargs,
-            )
-            result, truncation_diagnostics = retry_if_truncated(
-                asr,
-                audio_path,
-                result,
                 initial_chunk_seconds=initial_chunk_seconds,
                 retry_chunk_seconds=RETRY_CHUNK_SECONDS,
                 batch_size=max(1, int(batch_size)),
@@ -148,6 +151,117 @@ def run_asr(asr, audio_path: Path, chunk_length_s: float, batch_size: int, gener
         batch_size=batch_size,
         generate_kwargs=generate_kwargs,
     )
+
+
+def _free_cuda_cache() -> None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _run_asr_with_retry(
+    asr,
+    audio_path: Path,
+    initial_chunk_seconds: float,
+    retry_chunk_seconds: float,
+    batch_size: int,
+    generate_kwargs: dict,
+    warnings: list[str],
+) -> tuple[dict, dict]:
+    result = run_asr(
+        asr,
+        audio_path,
+        chunk_length_s=initial_chunk_seconds,
+        batch_size=batch_size,
+        generate_kwargs=generate_kwargs,
+    )
+    return retry_if_truncated(
+        asr,
+        audio_path,
+        result,
+        initial_chunk_seconds=initial_chunk_seconds,
+        retry_chunk_seconds=retry_chunk_seconds,
+        batch_size=batch_size,
+        generate_kwargs=generate_kwargs,
+        warnings=warnings,
+    )
+
+
+def transcribe_long_form(
+    asr,
+    audio_path: Path,
+    initial_chunk_seconds: float,
+    retry_chunk_seconds: float,
+    batch_size: int,
+    generate_kwargs: dict,
+    warnings: list[str],
+    segment_seconds: float = SEGMENT_SECONDS,
+) -> tuple[dict, dict]:
+    """Transcribe audio in independent segments to bound peak GPU memory.
+
+    Each segment gets its own asr() call, so tensors from earlier segments are
+    free to be garbage-collected before the next segment starts, instead of
+    accumulating across the whole recording in one long generate() call.
+    Segments are clamped to at most one Whisper chunk so a single call can
+    never internally process more than one chunk, however bad a recording's
+    hallucination behavior is.
+    """
+    segment_seconds = min(segment_seconds, initial_chunk_seconds)
+    audio_duration = wav_duration_seconds(audio_path)
+    if not audio_duration or audio_duration <= segment_seconds:
+        result, truncation = _run_asr_with_retry(
+            asr,
+            audio_path,
+            initial_chunk_seconds=initial_chunk_seconds,
+            retry_chunk_seconds=retry_chunk_seconds,
+            batch_size=batch_size,
+            generate_kwargs=generate_kwargs,
+            warnings=warnings,
+        )
+        return result, {"segment_seconds": segment_seconds, "segments": [truncation]}
+
+    boundaries: list[tuple[float, float]] = []
+    start = 0.0
+    while start < audio_duration:
+        end = min(audio_duration, start + segment_seconds)
+        boundaries.append((start, end))
+        start = end
+
+    all_chunks: list[dict] = []
+    text_parts: list[str] = []
+    segment_diagnostics: list[dict] = []
+    for idx, (seg_start, seg_end) in enumerate(boundaries):
+        segment_path = audio_path.with_name(f"{audio_path.stem}_segment_{idx:03d}.wav")
+        try:
+            write_wav_slice(audio_path, segment_path, seg_start, seg_end)
+            result, truncation = _run_asr_with_retry(
+                asr,
+                segment_path,
+                initial_chunk_seconds=initial_chunk_seconds,
+                retry_chunk_seconds=retry_chunk_seconds,
+                batch_size=batch_size,
+                generate_kwargs=generate_kwargs,
+                warnings=warnings,
+            )
+            shifted = shift_chunk_timestamps(result, seg_start)
+            all_chunks.extend(shifted.get("chunks") or [])
+            segment_text = (result.get("text") or "").strip()
+            if segment_text:
+                text_parts.append(segment_text)
+            segment_diagnostics.append({"segment_index": idx, "start": seg_start, "end": seg_end, **truncation})
+        finally:
+            try:
+                segment_path.unlink()
+            except OSError:
+                pass
+            _free_cuda_cache()
+
+    merged = {"text": " ".join(text_parts), "chunks": all_chunks}
+    return merged, {"segment_seconds": segment_seconds, "segments": segment_diagnostics}
 
 
 def build_generate_kwargs(
