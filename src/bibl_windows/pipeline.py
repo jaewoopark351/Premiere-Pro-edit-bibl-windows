@@ -427,9 +427,8 @@ class WindowsEditPipeline:
             )
 
         xml_path = layout.output_path(self.context, f"{layout.stem}_cut.xml")
-        media_for_xml = replace(media, duration=timeline_duration) if limit_seconds is not None else media
         xml_path.write_text(
-            build_fcp7_xml(media_for_xml, mapper.keeps, f"{layout.stem} [Windows rough cut]", clean_wav_path),
+            build_fcp7_xml(media, mapper.keeps, f"{layout.stem} [Windows rough cut]", clean_wav_path),
             encoding="utf-8",
             newline="\n",
         )
@@ -440,7 +439,7 @@ class WindowsEditPipeline:
             if deletions:
                 rejected_xml_path = layout.output_path(self.context, f"{layout.stem}_rejected.xml")
                 rejected_xml_path.write_text(
-                    build_fcp7_xml(media_for_xml, deletions, f"{layout.stem} [Rejected cuts review]", None),
+                    build_fcp7_xml(media, deletions, f"{layout.stem} [Rejected cuts review]", None),
                     encoding="utf-8",
                     newline="\n",
                 )

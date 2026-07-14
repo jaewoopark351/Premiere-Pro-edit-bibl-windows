@@ -116,4 +116,7 @@ def test_mocked_stt_e2e_generates_limited_xml_srt_and_manifest(monkeypatch):
     assert candidates["analysis_duration"] == 1.0
     assert keep_ranges["timeline_duration"] == 1.0
     assert manifest["limit_seconds"] == 1.0
-    assert "%ED%95%9C%EA%B8%80" in xml_text
+    # Premiere's FCP7 importer needs literal (non-percent-encoded) Korean text
+    # in pathurl to auto-locate media; see paths.windows_file_uri.
+    assert "한글" in xml_text
+    assert "%ED%95%9C" not in xml_text

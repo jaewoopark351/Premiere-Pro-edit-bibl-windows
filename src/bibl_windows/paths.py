@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,10 +63,29 @@ def ensure_inside(path: Path, parent: Path) -> None:
         raise PathSafetyError(f"path is outside allowed directory: {p}") from exc
 
 
+_URI_MUST_ESCAPE = re.compile(r'[ %#?\x00-\x1f]')
+
+
+def _relax_non_ascii_uri_escaping(uri: str) -> str:
+    """Un-escape percent-encoded non-ASCII path segments in a file:// URI.
+
+    `Path.as_uri()` percent-encodes every non-ASCII byte per RFC 3986, which is
+    correct but Adobe Premiere Pro's FCP7 XML importer fails to auto-locate
+    media whose `pathurl` uses percent-encoded Korean/CJK text (confirmed by
+    hand: an XML with the same path written as literal UTF-8 auto-links, the
+    percent-encoded version always prompts a manual "Locate Media" dialog).
+    Decoding back to literal characters and only re-escaping the handful of
+    ASCII characters that are unsafe in a URI keeps Premiere's importer happy
+    without touching UNC/drive-letter handling from `as_uri()`.
+    """
+    decoded = urllib.parse.unquote(uri, encoding="utf-8", errors="strict")
+    return _URI_MUST_ESCAPE.sub(lambda m: f"%{ord(m.group(0)):02X}", decoded)
+
+
 def windows_file_uri(path: Path) -> str:
     resolved = path if path.is_absolute() else path.resolve()
     try:
-        return resolved.as_uri()
+        return _relax_non_ascii_uri_escaping(resolved.as_uri())
     except ValueError as exc:
         raise PathSafetyError(
             "Could not convert media path to a Premiere file URI: "

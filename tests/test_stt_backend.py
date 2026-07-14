@@ -28,6 +28,18 @@ def test_build_generate_kwargs_includes_verbatim_prompt_and_conditioning():
     assert warnings == []
 
 
+def test_build_generate_kwargs_caps_max_new_tokens_to_bound_word_timestamp_memory():
+    kwargs = build_generate_kwargs(
+        FakeAsr(),
+        language="ko",
+        initial_prompt=None,
+        condition_on_previous_text=True,
+        warnings=[],
+    )
+
+    assert kwargs["max_new_tokens"] == 256
+
+
 def test_words_from_chunks_skips_missing_timestamps_without_zero_fallback():
     warnings = []
 

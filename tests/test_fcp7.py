@@ -32,7 +32,7 @@ def test_fcp7_xml_parses_and_escapes_media_uri_special_characters():
     pathurl = root.find(".//pathurl")
     assert pathurl is not None
     assert "%23" in pathurl.text
-    assert "%26" in pathurl.text
+    assert "&" in pathurl.text
     assert "%25" in pathurl.text
 
 

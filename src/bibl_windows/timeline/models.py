@@ -29,11 +29,6 @@ class TimeRange:
         return TimeRange(max(0.0, self.start), min(total, self.end))
 
 
-@dataclass(frozen=True, order=True)
-class KeepRange(TimeRange):
-    source_start: float = field(init=False, repr=False, compare=False)
-
-
 @dataclass(frozen=True)
 class TranscriptWord:
     start: float

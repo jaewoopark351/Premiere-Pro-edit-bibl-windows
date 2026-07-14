@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from ..ffmpeg_tools import media_input_arg, run_checked
+from ..ffmpeg_tools import media_input_arg, media_output_arg, run_checked
 from ..media_probe import MediaInfo
 from ..paths import windows_file_uri
 from ..subtitles.ass import write_ass
@@ -151,6 +151,6 @@ def render_vertical_mp4(ffmpeg: Path, media_path: Path, clip_range: TimeRange, o
             "aac",
             "-b:a",
             "192k",
-            output_mp4,
+            media_output_arg(output_mp4),
         ]
     )

@@ -3,18 +3,21 @@ from pathlib import Path
 from bibl_windows.paths import media_stem, windows_file_uri
 
 
-def test_windows_file_uri_encodes_spaces_and_korean():
+def test_windows_file_uri_encodes_spaces_but_keeps_korean_literal():
+    # Premiere Pro's FCP7 XML importer cannot auto-locate media whose pathurl
+    # percent-encodes non-ASCII text, so Korean must survive as literal UTF-8.
     uri = windows_file_uri(Path(r"C:\테스트 영상\한글 공백.mp4"))
     assert uri.startswith("file:///C:/")
     assert "%20" in uri
-    assert "%ED%95%9C%EA%B8%80" in uri
+    assert "한글" in uri
+    assert "%ED%95%9C" not in uri
 
 
 def test_windows_file_uri_encodes_drive_path_special_characters():
     uri = windows_file_uri(Path(r"D:\테스트 영상\편집 원본 #1 & 50%.mp4"))
     assert uri.startswith("file:///D:/")
     assert "%23" in uri
-    assert "%26" in uri
+    assert "&" in uri
     assert "%25" in uri
 
 

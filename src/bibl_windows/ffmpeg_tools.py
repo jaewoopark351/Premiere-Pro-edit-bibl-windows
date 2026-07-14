@@ -99,6 +99,11 @@ def media_input_arg(path: Path) -> str:
     return windows_native_path(path)
 
 
+def media_output_arg(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return windows_native_path(path)
+
+
 def ffprobe_json(ffprobe: Path, media: Path) -> dict:
     completed = run_checked(
         [
@@ -189,7 +194,7 @@ def make_clean_wav(
         str(sample_rate),
         "-ac",
         str(channels),
-        output_wav,
+        media_output_arg(output_wav),
     ]
     run_checked(args)
 
@@ -211,6 +216,6 @@ def extract_audio_for_stt(ffmpeg: Path, media: Path, output_wav: Path, limit_sec
         "16000",
         "-c:a",
         "pcm_s16le",
-        output_wav,
+        media_output_arg(output_wav),
     ]
     run_checked(args)

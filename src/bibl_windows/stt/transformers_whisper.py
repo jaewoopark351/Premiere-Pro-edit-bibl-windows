@@ -124,6 +124,11 @@ def build_generate_kwargs(
         "language": language,
         "task": "transcribe",
         "condition_on_prev_tokens": bool(condition_on_previous_text),
+        # Word-level timestamps keep a cross-attention tensor per generated token.
+        # Music/singing chunks can make Whisper hallucinate far more tokens than any
+        # real 25-30s speech chunk needs, which blows past 16GB of VRAM. Capping
+        # max_new_tokens bounds that worst case without affecting normal speech.
+        "max_new_tokens": 256,
     }
     if not initial_prompt:
         return kwargs
