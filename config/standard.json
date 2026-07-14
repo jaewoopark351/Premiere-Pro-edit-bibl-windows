@@ -21,7 +21,13 @@
     "remove_fillers": false,
     "remove_hesitation": false,
     "acoustic_filler": false,
-    "auto_delete_reasons": []
+    "auto_delete_reasons": [
+      "start_wait",
+      "end_long_silence",
+      "long_silence",
+      "repeated_word",
+      "repeated_phrase"
+    ]
   },
   "stt": {
     "model": "openai/whisper-large-v3",

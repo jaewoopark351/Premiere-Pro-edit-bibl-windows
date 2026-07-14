@@ -11,6 +11,7 @@ from .analysis.cuts import (
     repeated_speech_candidates,
     short_meaningless_candidates,
     silence_candidates,
+    source_repetition_profile,
 )
 from .analysis.acoustic import acoustic_filler_candidates
 from .artifacts import ArtifactManifest
@@ -282,7 +283,14 @@ class WindowsEditPipeline:
         if transcript_json and transcript_json.exists():
             words = limit_words(load_transcript_words(transcript_json), analysis_duration)
             policy = preset.get("policy", {})
-            candidates += repeated_speech_candidates(words, float(cut_cfg["repeat_gap"]), float(cut_cfg["word_pad"]))
+            repetition_profile = source_repetition_profile(words, analysis_duration)
+            audio_analysis["source_type_gate"] = repetition_profile
+            candidates += repeated_speech_candidates(
+                words,
+                float(cut_cfg["repeat_gap"]),
+                float(cut_cfg["word_pad"]),
+                protect_auto_delete=bool(repetition_profile.get("music_like")),
+            )
             candidates += false_start_candidates(
                 words,
                 float(cut_cfg["repeat_gap"]),
@@ -317,10 +325,12 @@ class WindowsEditPipeline:
                     )
                     for item in breath_ranges
                 ]
-                audio_analysis = {
-                    "noise_floor": noise.to_dict(),
-                    "breath_ranges": [item.__dict__ for item in breath_ranges],
-                }
+                audio_analysis.update(
+                    {
+                        "noise_floor": noise.to_dict(),
+                        "breath_ranges": [item.__dict__ for item in breath_ranges],
+                    }
+                )
         candidates = dedupe_candidates(apply_preset_policy(candidates, preset_name, preset))
         out = layout.output_path(self.context, f"{layout.stem}_cut_candidates.json")
         write_json(

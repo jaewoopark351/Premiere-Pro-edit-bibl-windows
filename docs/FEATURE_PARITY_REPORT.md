@@ -66,7 +66,7 @@
 | Whisper 음성 인식 | `engine/make_subtitles.py`, `engine/auto_cut.py` | `stt/transformers_whisper.py`, `pipeline.py` | 예 | 부분 구현 | 원본은 `mlx-whisper`, Windows는 Transformers/PyTorch CUDA. transcript cache와 verbatim prompt를 지원하지만 라이브러리 차이가 있음 | 중간 | mocked E2E, transcript cache test, 실제 STT smoke |
 | 한국어 STT | `make_subtitles.py` | `cli.py`, `transformers_whisper.py` | 예 | 부분 구현 | 기본 `ko`, verbatim prompt, previous-text conditioning, word timestamp 검증을 지원 | 쉬움 | Korean filename/input dry-run, STT timestamp tests, 실제 STT |
 | 무음 감지 | `silence_cut.py` | `ffmpeg_tools.detect_silence`, `pipeline.analyze_cuts` | 예 | 부분 구현 | FFmpeg silencedetect 기반이나 원본 keep 중심 세부와 다름 | 쉬움 | mocked E2E |
-| 반복 발화 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 부분 구현 | 단어 반복과 짧은 구절 반복을 감지하지만 Windows 휴리스틱이 더 보수적 | 중간 | cut analysis tests |
+| 반복 발화 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 부분 구현 | 단어 반복과 짧은 구절 반복을 감지. 자동삭제 여부는 프리셋 정책으로 제어하고 음악형 반복 소스는 review로 보호 | 중간 | cut analysis tests |
 | false-start 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 부분 구현 | prefix restart와 유사 구절 후보를 만들고 aggressive에서는 자동 삭제, standard/conservative에서는 review 중심 | 중간 | 후보 JSON 확인, cut analysis tests |
 | 어/음 필러 감지 | `auto_cut.py`, `config.py` | `analysis/cuts.py` | 예 | 부분 구현 | 텍스트 기반 후보를 만들고 aggressive에서는 protected context를 제외하고 자동 삭제 | 중간 | 후보 JSON 확인 |
 | 음향 기반 필러 감지 | `acoustic_filler.py` | `analysis/acoustic.py`, `pipeline.analyze_cuts` | 예 | 부분 구현 | standard/conservative에서는 review signal, aggressive에서는 자동 삭제 후보 | 중간 | audio feature unit test |
@@ -124,6 +124,8 @@
 - Whisper `max_new_tokens=256` 상한은 유지하되, 토큰 상한/비정상 early end 의심 시 해당 WAV 구간만 작은 chunk로 재시도하고 manifest 진단에 기록한다.
 - `doctor --strict`를 추가하고 `install.ps1`의 마지막 설치 검사를 strict 모드로 바꿨다.
 - 반복 구절 감지와 prefix false-start 감지를 추가했다.
+- `long_silence`, `start_wait`, `end_long_silence`, `repeated_word`, `repeated_phrase` 자동삭제를 후보 생성 하드코딩이 아니라 프리셋 `policy.auto_delete_reasons`로 제어하게 했다.
+- STT 단어 밀도와 반복 토큰 비율로 노래/음악형 소스를 감지해 반복어 컷을 자동 삭제하지 않고 review로 남기는 게이트를 추가했다.
 - aggressive 프리셋에서 filler, hesitation, acoustic filler, false-start가 실제 자동 삭제 후보가 되도록 원본 정책을 복원했다.
 - 기본 오디오 처리를 `clean_wav=True`, `audio_preset=natural`로 바꿔 원본 기본 동작과 맞췄다.
 - 모든 자동 삭제 후보의 단어 경계 침범 보호를 추가했다.

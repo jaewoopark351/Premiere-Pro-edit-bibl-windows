@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections import Counter
 from dataclasses import replace
 
 from ..timeline.models import CutCandidate, TimeRange, TranscriptWord
@@ -29,6 +30,10 @@ AGGRESSIVE_AUTO_REASONS = {
     "false_start_prefix",
     "false_start_repeat",
 }
+MUSIC_LIKE_MIN_WORDS = 20
+MUSIC_LIKE_MAX_WORD_DENSITY = 1.7
+MUSIC_LIKE_MIN_DOMINANT_TOKEN_RATIO = 0.22
+MUSIC_LIKE_MIN_CONSECUTIVE_REPEAT_RATIO = 0.18
 
 
 def _norm(text: str) -> str:
@@ -48,7 +53,6 @@ def silence_candidates(
     for silence in silences:
         reason = None
         confidence = 0.75
-        auto_delete = True
         if silence.start <= 0.25 and silence.duration >= start_wait:
             reason = "start_wait"
             confidence = 0.95
@@ -68,17 +72,23 @@ def silence_candidates(
                         end=end,
                         reason=reason,
                         confidence=confidence,
-                        auto_delete=auto_delete,
-                        requires_review=False,
+                        auto_delete=False,
+                        requires_review=True,
                         metadata={"source": "ffmpeg.silencedetect", "duration": silence.duration},
                     )
                 )
     return candidates
 
 
-def repeated_speech_candidates(words: list[TranscriptWord], max_gap: float, pad: float) -> list[CutCandidate]:
+def repeated_speech_candidates(
+    words: list[TranscriptWord],
+    max_gap: float,
+    pad: float,
+    protect_auto_delete: bool = False,
+) -> list[CutCandidate]:
     out: list[CutCandidate] = []
     tokens = [_norm(w.text) for w in words]
+    protected_metadata = {"protected_context": True, "source_type_gate": "music_like_repetition"} if protect_auto_delete else {}
     for size in (4, 3, 2):
         idx = 0
         while idx + size * 2 <= len(words):
@@ -92,9 +102,9 @@ def repeated_speech_candidates(words: list[TranscriptWord], max_gap: float, pad:
                         end=min(words[idx + size].start, words[idx + size - 1].end + pad),
                         reason="repeated_phrase",
                         confidence=0.84,
-                        auto_delete=True,
-                        requires_review=False,
-                        metadata={"text": " ".join(w.text for w in words[idx : idx + size]), "words": size},
+                        auto_delete=False,
+                        requires_review=True,
+                        metadata={"text": " ".join(w.text for w in words[idx : idx + size]), "words": size} | protected_metadata,
                     )
                 )
                 idx += size * 2
@@ -112,9 +122,9 @@ def repeated_speech_candidates(words: list[TranscriptWord], max_gap: float, pad:
                     end=end,
                     reason="repeated_word",
                     confidence=0.88,
-                    auto_delete=True,
-                    requires_review=False,
-                    metadata={"text": words[idx].text},
+                    auto_delete=False,
+                    requires_review=True,
+                    metadata={"text": words[idx].text} | protected_metadata,
                 )
             )
         idx += 1
@@ -230,16 +240,60 @@ def apply_preset_policy(candidates: list[CutCandidate], preset_name: str, preset
     auto_reasons = set(policy.get("auto_delete_reasons", []))
     if preset_name == "aggressive":
         auto_reasons |= AGGRESSIVE_AUTO_REASONS
-    if not auto_reasons:
-        return candidates
     out: list[CutCandidate] = []
     for candidate in candidates:
         protected_context = bool(candidate.metadata.get("protected_context"))
         if candidate.reason in auto_reasons and not protected_context:
             out.append(replace(candidate, auto_delete=True, requires_review=False))
+        elif candidate.auto_delete:
+            out.append(replace(candidate, auto_delete=False, requires_review=True))
         else:
             out.append(candidate)
     return out
+
+
+def source_repetition_profile(words: list[TranscriptWord], duration: float) -> dict:
+    tokens = [_norm(word.text) for word in words]
+    tokens = [token for token in tokens if token]
+    token_count = len(tokens)
+    safe_duration = max(0.001, duration)
+    density = token_count / safe_duration
+    if not tokens:
+        return {
+            "token_count": 0,
+            "duration": duration,
+            "word_density": 0.0,
+            "dominant_token_ratio": 0.0,
+            "consecutive_repeat_ratio": 0.0,
+            "music_like": False,
+        }
+
+    counts = Counter(tokens)
+    dominant_token, dominant_count = counts.most_common(1)[0]
+    consecutive_repeats = sum(1 for prev, cur in zip(tokens, tokens[1:]) if prev == cur)
+    consecutive_repeat_ratio = consecutive_repeats / max(1, token_count - 1)
+    dominant_token_ratio = dominant_count / token_count
+    music_like = (
+        token_count >= MUSIC_LIKE_MIN_WORDS
+        and density <= MUSIC_LIKE_MAX_WORD_DENSITY
+        and (
+            dominant_token_ratio >= MUSIC_LIKE_MIN_DOMINANT_TOKEN_RATIO
+            or consecutive_repeat_ratio >= MUSIC_LIKE_MIN_CONSECUTIVE_REPEAT_RATIO
+        )
+    )
+    return {
+        "token_count": token_count,
+        "duration": duration,
+        "word_density": density,
+        "dominant_token": dominant_token,
+        "dominant_token_ratio": dominant_token_ratio,
+        "consecutive_repeat_ratio": consecutive_repeat_ratio,
+        "music_like": music_like,
+    }
+
+
+def looks_like_music_source(words: list[TranscriptWord], duration: float) -> bool:
+    return bool(source_repetition_profile(words, duration).get("music_like"))
 
 
 def is_contextual_filler(token: str, words: list[TranscriptWord], idx: int) -> bool:
