@@ -86,9 +86,16 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 - 기존 `.venv` Python 버전/64-bit 여부
 - FFmpeg/FFprobe PATH
 - NVIDIA GPU와 VRAM 정보
-- CUDA PyTorch cu128 패키지
+- CUDA 12.8 기반 PyTorch `cu128` 패키지
 - `constraints-windows-cu128.txt` 기반 Windows 의존성
 - 설치 마지막의 `doctor --strict` 필수 조건
+
+CUDA 기준:
+
+- 이 프로젝트의 검증 기준 PyTorch CUDA 런타임은 **CUDA 12.8 / cu128**입니다.
+- 설치 스크립트는 `torch==2.11.0+cu128`, `torchvision==0.26.0+cu128`, `torchaudio==2.11.0+cu128`을 공식 PyTorch `cu128` 인덱스에서 설치합니다.
+- 별도 CUDA Toolkit 설치는 보통 필요하지 않습니다. PyTorch wheel에 CUDA 런타임이 포함됩니다.
+- NVIDIA 드라이버는 CUDA 12.8 런타임을 지원하는 최신 버전을 권장합니다.
 
 수동 설치:
 
