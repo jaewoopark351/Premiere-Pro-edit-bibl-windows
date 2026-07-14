@@ -80,10 +80,17 @@ def launch_premiere(
     xml_path: Path | None = None,
     script_path: Path | None = None,
 ) -> subprocess.Popen:
+    """Launch Premiere Pro without unsupported Windows script auto-run flags.
+
+    Premiere Pro for Windows does not accept After Effects' ``-r script.jsx``
+    command-line switch. Passing it makes Premiere treat ``-r <script>`` as a
+    project path and show a misleading "project open" error dialog. Keep the
+    ``script_path`` parameter for CLI compatibility, but do not pass it to the
+    process; users must import XML/SRT manually or run JSX from Premiere's own
+    UI when available.
+    """
     args = [str(premiere_exe)]
-    if script_path is not None:
-        args += ["-r", str(script_path.resolve())]
-    elif xml_path is not None:
+    if script_path is None and xml_path is not None:
         args.append(str(xml_path.resolve()))
     return subprocess.Popen(args)
 

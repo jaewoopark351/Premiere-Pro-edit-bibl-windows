@@ -25,6 +25,7 @@ from .io_json import read_json, write_json
 from .media_probe import MediaInfo, probe_media
 from .paths import ensure_inside, media_stem, safe_output_component, short_path_hash
 from .premiere.fcp7 import build_fcp7_xml
+from .premiere.xml_validation import validate_fcp7_xml_pathurls, validation_error_message
 from .reports.html import write_report
 from .runtime import RuntimeContext, RuntimeErrorWithHint
 from .stt.base import TranscriptResult, transcript_result_from_dict
@@ -441,6 +442,9 @@ class WindowsEditPipeline:
             encoding="utf-8",
             newline="\n",
         )
+        xml_validation = validate_fcp7_xml_pathurls(xml_path, expected_media=media.path, expected_clean_audio=clean_wav_path)
+        if not xml_validation["ok"]:
+            raise RuntimeErrorWithHint(validation_error_message(xml_validation))
         review_summary = summarize_cut_review(candidates, deletions, mapper.keeps, timeline_duration)
         if extra_exports:
             cut_review_json = layout.output_path(self.context, f"{layout.stem}_cut_review.json")
@@ -452,6 +456,9 @@ class WindowsEditPipeline:
                     encoding="utf-8",
                     newline="\n",
                 )
+                rejected_validation = validate_fcp7_xml_pathurls(rejected_xml_path, expected_media=media.path)
+                if not rejected_validation["ok"]:
+                    raise RuntimeErrorWithHint(validation_error_message(rejected_validation))
         report_path = layout.output_path(self.context, f"{layout.stem}_report.html")
         write_report(
             report_path,

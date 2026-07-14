@@ -11,6 +11,7 @@ from .ffmpeg_tools import ToolError, tool_info
 from .io_json import read_json, write_json
 from .media_probe import probe_media
 from .paths import PathSafetyError
+from .paths import localhost_file_uri, premiere_fcp7_pathurl, premiere_legacy_drive_file_uri, standards_compliant_file_uri
 from .pipeline import PipelineOptions, WindowsEditPipeline, load_transcript_words
 from .runtime import RuntimeContext, RuntimeErrorWithHint
 from .shorts.generator import ShortArtifact, build_vertical_xml, parse_range, render_vertical_mp4, write_short_subtitles
@@ -19,6 +20,8 @@ from .multicam.sync import best_lag_seconds, extract_envelope
 from .multicam.switching import build_auto_switched_multicam_xml, plan_camera_switches
 from .multicam.xml import build_multicam_xml
 from .premiere.automation import find_premiere_executable, launch_premiere, write_import_render_script
+from .premiere.fcp7 import build_fcp7_xml
+from .premiere.xml_validation import validate_fcp7_xml_pathurls
 from .video.analyze import analyze_video
 
 
@@ -368,6 +371,123 @@ def cmd_auto_multicam_xml(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate_xml(args: argparse.Namespace) -> int:
+    report = validate_fcp7_xml_pathurls(
+        Path(args.xml),
+        expected_media=Path(args.media) if args.media else None,
+        expected_clean_audio=Path(args.clean_audio) if args.clean_audio else None,
+    )
+    print_json(report)
+    return 0 if report["ok"] else 2
+
+
+def cmd_premiere_path_tests(args: argparse.Namespace) -> int:
+    context = RuntimeContext.discover()
+    _ffmpeg, ffprobe = context.tools.require_media_tools()
+    media_path = Path(args.input)
+    if not media_path.exists():
+        raise RuntimeErrorWithHint(f"Input media file was not found: {media_path}")
+    media = probe_media(ffprobe, media_path)
+    clip_end = min(media.duration, max(0.1, args.duration_seconds))
+    keeps = [TimeRange(0.0, clip_end)]
+    variants = {
+        "literal": premiere_fcp7_pathurl,
+        "encoded": standards_compliant_file_uri,
+        "legacy_drive_literal": lambda path: premiere_legacy_drive_file_uri(path, encoded=False),
+        "legacy_drive_encoded": lambda path: premiere_legacy_drive_file_uri(path, encoded=True),
+        "localhost_literal": lambda path: localhost_file_uri(path, encoded=False),
+        "localhost_encoded": lambda path: localhost_file_uri(path, encoded=True),
+        "localhost_colon_encoded": lambda path: localhost_file_uri(path, encoded=True, encode_drive_colon=True),
+    }
+    variant_reports: dict[str, dict] = {}
+    variant_files: dict[str, str] = {}
+    variant_pathurls: dict[str, str] = {}
+    for variant, factory in variants.items():
+        xml_path = context.paths.output_path(f"{media_path.stem}_{variant}_path_test.xml")
+        xml_path.write_text(
+            build_fcp7_xml(
+                media,
+                keeps,
+                f"{media_path.stem} {variant} pathurl test",
+                None,
+                pathurl_factory=factory,
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        variant_files[variant] = str(xml_path)
+        variant_pathurls[variant] = factory(media.path)
+        variant_reports[variant] = validate_fcp7_xml_pathurls(xml_path, expected_media=media.path)
+    report = {
+        "input": str(media.path),
+        "duration_seconds": clip_end,
+        "variants": variant_files,
+        "pathurls": variant_pathurls,
+        "validation": variant_reports,
+        "premiere_manual_check": "Import each XML file in Premiere Pro. Use whichever one auto-links without the Locate Media dialog.",
+    }
+    report_path = context.paths.output_path(f"{media_path.stem}_path_test_report.json")
+    write_json(report_path, report)
+    for variant, xml_path in variant_files.items():
+        print(f"{variant}_xml={xml_path}")
+    print(f"path_test_report_json={report_path}")
+    return 0 if all(item["ok"] for item in variant_reports.values()) else 2
+
+
+def cmd_premiere_structure_tests(args: argparse.Namespace) -> int:
+    context = RuntimeContext.discover()
+    _ffmpeg, ffprobe = context.tools.require_media_tools()
+    media_path = Path(args.input)
+    if not media_path.exists():
+        raise RuntimeErrorWithHint(f"Input media file was not found: {media_path}")
+    media = probe_media(ffprobe, media_path)
+    clean_audio = Path(args.clean_audio) if args.clean_audio else None
+    if clean_audio is not None and not clean_audio.exists():
+        raise RuntimeErrorWithHint(f"Clean audio file was not found: {clean_audio}")
+    clip_end = min(media.duration, max(0.1, args.duration_seconds))
+    keeps = [TimeRange(0.0, clip_end)]
+    pathurl_styles = {
+        "encoded": standards_compliant_file_uri,
+        "legacy_drive_encoded": lambda path: premiere_legacy_drive_file_uri(path, encoded=True),
+        "localhost_encoded": lambda path: localhost_file_uri(path, encoded=True),
+    }
+    media_modes = ("full", "video-only", "none")
+    reports: dict[str, dict] = {}
+    files: dict[str, str] = {}
+    for style, factory in pathurl_styles.items():
+        for mode in media_modes:
+            key = f"{style}_{mode}"
+            xml_path = context.paths.output_path(f"{media_path.stem}_{key}_structure_test.xml")
+            xml_path.write_text(
+                build_fcp7_xml(
+                    media,
+                    keeps,
+                    f"{media_path.stem} {key} structure test",
+                    clean_audio,
+                    pathurl_factory=factory,
+                    video_file_media=mode,
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            files[key] = str(xml_path)
+            reports[key] = validate_fcp7_xml_pathurls(xml_path, expected_media=media.path, expected_clean_audio=clean_audio)
+    report = {
+        "input": str(media.path),
+        "clean_audio": str(clean_audio) if clean_audio else None,
+        "duration_seconds": clip_end,
+        "variants": files,
+        "validation": reports,
+        "premiere_manual_check": "Import each XML file in Premiere Pro. This isolates video <file><media> structure from pathurl formatting.",
+    }
+    report_path = context.paths.output_path(f"{media_path.stem}_structure_test_report.json")
+    write_json(report_path, report)
+    for key, xml_path in files.items():
+        print(f"{key}_xml={xml_path}")
+    print(f"structure_test_report_json={report_path}")
+    return 0 if all(item["ok"] for item in reports.values()) else 2
+
+
 def cmd_premiere_script(args: argparse.Namespace) -> int:
     context = RuntimeContext.discover()
     xml_path = Path(args.xml)
@@ -409,6 +529,10 @@ def cmd_premiere_launch(args: argparse.Namespace) -> int:
     process = launch_premiere(premiere_exe, xml_path=xml_path, script_path=script_path)
     print(f"premiere_pid={process.pid}")
     print(f"premiere_exe={premiere_exe}")
+    if script_path is not None:
+        print("warning=Premiere Pro for Windows does not support command-line JSX auto-run with -r; opened Premiere without passing the script.")
+        print(f"manual_script={script_path.resolve()}")
+        print("manual_steps=Create or open a Premiere project, then import the XML/SRT manually. If your Premiere build exposes a script runner, run the JSX from inside Premiere.")
     return 0
 
 
@@ -583,6 +707,26 @@ def build_parser() -> argparse.ArgumentParser:
     auto_multicam.add_argument("--output")
     auto_multicam.set_defaults(func=cmd_auto_multicam_xml)
 
+    validate_xml = sub.add_parser("validate-xml")
+    validate_xml.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    validate_xml.add_argument("xml")
+    validate_xml.add_argument("--media")
+    validate_xml.add_argument("--clean-audio")
+    validate_xml.set_defaults(func=cmd_validate_xml)
+
+    path_tests = sub.add_parser("premiere-path-tests")
+    path_tests.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    path_tests.add_argument("input")
+    path_tests.add_argument("--duration-seconds", type=float, default=1.0)
+    path_tests.set_defaults(func=cmd_premiere_path_tests)
+
+    structure_tests = sub.add_parser("premiere-structure-tests")
+    structure_tests.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    structure_tests.add_argument("input")
+    structure_tests.add_argument("--clean-audio")
+    structure_tests.add_argument("--duration-seconds", type=float, default=1.0)
+    structure_tests.set_defaults(func=cmd_premiere_structure_tests)
+
     premiere_script = sub.add_parser("premiere-script")
     premiere_script.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     premiere_script.add_argument("xml")
@@ -595,8 +739,11 @@ def build_parser() -> argparse.ArgumentParser:
     premiere_launch = sub.add_parser("premiere-launch")
     premiere_launch.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     premiere_launch.add_argument("--premiere-exe")
-    premiere_launch.add_argument("--xml")
-    premiere_launch.add_argument("--script")
+    premiere_launch.add_argument("--xml", help="optional project/XML path to pass when no --script is provided")
+    premiere_launch.add_argument(
+        "--script",
+        help="JSX path to validate and report for manual use; Windows Premiere is launched without unsupported -r auto-run",
+    )
     premiere_launch.set_defaults(func=cmd_premiere_launch)
 
     note = sub.add_parser("note")

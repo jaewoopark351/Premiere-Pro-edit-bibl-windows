@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
-from bibl_windows.premiere.automation import jsx_string, write_import_render_script
+from bibl_windows.premiere.automation import jsx_string, launch_premiere, write_import_render_script
 
 
 def workspace_tmp(name: str) -> Path:
@@ -34,3 +34,44 @@ def test_jsx_string_uses_forward_slashes_and_quotes():
     assert text.endswith('"')
     assert "/" in text
     assert "\\테스트" not in text
+
+
+def test_launch_premiere_does_not_pass_after_effects_r_flag_for_script(monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        pid = 1234
+
+    def fake_popen(args):
+        captured["args"] = args
+        return FakeProcess()
+
+    monkeypatch.setattr("bibl_windows.premiere.automation.subprocess.Popen", fake_popen)
+
+    exe = Path(r"C:\Program Files\Adobe\Adobe Premiere Pro 2024\Adobe Premiere Pro.exe")
+    script = Path(r"C:\work\import.jsx")
+    process = launch_premiere(exe, script_path=script)
+
+    assert process.pid == 1234
+    assert captured["args"] == [str(exe)]
+    assert "-r" not in captured["args"]
+    assert str(script) not in captured["args"]
+
+
+def test_launch_premiere_can_still_pass_xml_when_no_script(monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        pid = 5678
+
+    def fake_popen(args):
+        captured["args"] = args
+        return FakeProcess()
+
+    monkeypatch.setattr("bibl_windows.premiere.automation.subprocess.Popen", fake_popen)
+
+    exe = Path(r"C:\Program Files\Adobe\Adobe Premiere Pro 2024\Adobe Premiere Pro.exe")
+    xml = Path(r"C:\work\cut.xml")
+    launch_premiere(exe, xml_path=xml)
+
+    assert captured["args"] == [str(exe), str(xml.resolve())]

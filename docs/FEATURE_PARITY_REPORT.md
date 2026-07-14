@@ -86,7 +86,7 @@
 | 자막 줄 길이 제한 | `make_subtitles.py` | `subtitles/srt.py` | 예 | 부분 구현 | 단순 max chars/gap 중심 | 중간 | subtitle tests |
 | 자막 빈 구간 보정 | `subtitle_polish.py` | `subtitles/srt.py` | 예 | 부분 구현 | small gap 보정만 지원 | 쉬움 | subtitle tests |
 | FCP7 XML 생성 | `silence_cut.py` | `premiere/fcp7.py`, `pipeline.export` | 예 | 완전 구현 | XML 파싱 테스트 포함 | 중간 | FCP7 XML tests |
-| Premiere media path URI | `silence_cut.py` | `paths.standards_compliant_file_uri`, `paths.premiere_fcp7_pathurl`, `premiere/fcp7.py` | 예 | 완전 구현 | 표준 URI와 Premiere FCP7 pathurl 역할을 분리. Premiere pathurl은 한글/CJK 자동 연결을 위해 non-ASCII escaping을 완화 | 중간 | URI/FCP7 tests |
+| Premiere media path URI | `silence_cut.py` | `paths.standards_compliant_file_uri`, `paths.premiere_fcp7_pathurl`, `premiere/fcp7.py` | 예 | 완전 구현 | 표준 URI와 Premiere FCP7 pathurl 역할을 분리. Premiere Pro 2024 수동 검증 결과 로컬 드라이브는 `file:C:/...` 리터럴 pathurl을 기본값으로 사용 | 중간 | URI/FCP7 tests |
 | keep range 생성 | `silence_cut.py` | `timeline/mapper.py`, `pipeline.export` | 예 | 완전 구현 | deletion -> keep mapping | 쉬움 | mapper tests |
 | 버린 컷 검토 데이터 | `auto_cut.complement()` | `cut_candidates.json`, `keep_ranges.json`, `cut_review.json`, `rejected.xml`, report | 예 | 완전 구현 | 삭제 구간 JSON과 버린 컷만 이어 붙인 FCP7 XML을 제공 | 중간 | JSON/report/XML parse tests |
 | HTML 리포트 | `html_report.py` | `reports/html.py` | 예 | 부분 구현 | 원본 리포트보다 간결하지만 삭제 구간과 촘촘한 컷 구간을 표시 | 쉬움 | report tests |
@@ -100,7 +100,7 @@
 | 2카메라 동기화 | `sync_2cam.py` | `multicam/sync.py`, `cli sync-2cam` | 예 | 부분 구현 | numpy envelope correlation | 큼 | sync smoke |
 | 멀티캠 XML | `mcam_xml.py` | `multicam/xml.py`, `cli multicam-xml` | 예 | 검토용 구현 | explicit offset/multi-track XML | 큼 | multicam tests |
 | 자동 카메라 전환 | 원본 별도 로직 일부 | `multicam/switching.py`, `cli auto-multicam-xml` | 예 | 검토용 구현 | keep range를 switch interval로 나누는 보수적 round-robin 휴리스틱 | 큼 | multicam switching tests, XML parse smoke |
-| Premiere 자동 렌더링 | 없음/수동 | `premiere/automation.py`, `cli premiere-script`, `cli premiere-launch` | 예 | 검토용 구현 | JSX 생성/실행기 제공. 실제 Premiere/Media Encoder 성공 여부는 GUI 환경 수동 검증 필요 | 큼 | JSX generation tests |
+| Premiere 자동 렌더링 | 없음/수동 | `premiere/automation.py`, `cli premiere-script`, `cli premiere-launch` | 예 | 검토용 구현 | JSX 생성과 Premiere 실행 보조를 제공. Windows Premiere Pro는 `-r` JSX 자동 실행을 지원하지 않아 수동 import/스크립트 실행 필요 | 큼 | JSX generation tests |
 | Claude agent/skill 연동 | `.claude/*`, 원본 README의 Claude Code agent team 설명 | `claude_assets.py`, `cli claude`, `pipeline.py`, manifest, `output/_workspace/<base>/` | 예 | 부분 구현 | `.claude` 본문을 읽고 Claude Code용 context/cut result/handoff를 생성하지만, 실제 subagent 실행과 Premiere GUI import는 사용자가 Claude Code/Premiere에서 수행해야 함 | 중간 | claude asset tests, mocked E2E workspace tests |
 
 ## 이번 검수에서 수정한 핵심 문제
@@ -109,13 +109,16 @@
 - STT 전용 제한은 `--stt-limit-seconds`와 기존 호환 alias `--transcribe-seconds`로 분리했다.
 - `--smoke-seconds`를 전체 파이프라인 스모크 제한 alias로 추가했다.
 - clean WAV, silence analysis, candidate analysis, XML, SRT/VTT/ASS, report, keep range가 같은 제한 시간을 사용하게 했다.
-- FCP7 XML media URI를 수동 조립에서 표준 `Path.as_uri()` 기반으로 바꾸고, Premiere 전용 pathurl 완화 함수를 분리했다.
+- FCP7 XML media URI를 표준 `Path.as_uri()`와 Premiere 전용 FCP7 pathurl로 분리했다.
+- FCP7 XML 저장 직후 모든 `<pathurl>`을 Windows 경로로 복원해 실제 파일 존재를 검사하는 validator를 추가했다.
+- Premiere Pro 2024 새 프로젝트 수동 검증에서 자동 연결된 `file:C:/...` 리터럴 pathurl을 기본값으로 적용했다.
+- Premiere 한글/로컬 드라이브 자동 연결 이슈를 비교하기 위해 `file:C:/...`, RFC 3986 percent-encoded, `file://C:/...` drive-authority, `file://localhost/...`, drive-colon encoded pathurl XML을 생성하는 `premiere-path-tests` 명령을 추가했다.
 - 같은 stem의 기존 manifest가 다른 입력 파일을 가리키면 output name에 짧은 hash를 붙여 덮어쓰기를 피한다.
 - `--output-dir`, `--output-name`, `--overwrite`를 추가했다.
 - 일반 CLI 오류는 traceback 없이 간단히 출력하고, `--debug`에서만 traceback을 표시한다.
 - install/run/batch PowerShell wrapper의 입력/venv 확인과 batch 성공/실패 목록을 보강했다.
 - `auto-multicam-xml`로 자동 카메라 전환용 단일 러프컷 XML과 switch plan JSON을 생성한다.
-- `premiere-script`와 `premiere-launch`로 Premiere XML/SRT import 및 선택적 MP4 export JSX를 생성하고 Premiere 실행 진입점을 제공한다.
+- `premiere-script`는 Premiere XML/SRT import 및 선택적 MP4 export JSX를 생성한다. `premiere-launch --script`는 Windows Premiere Pro에 unsupported `-r` 인자를 넘기지 않고 Premiere만 연 뒤 수동 실행 안내를 출력한다.
 - transcript cache를 추가했다. 입력 파일, 크기/mtime, 모델, 언어, chunk, STT 제한 시간이 모두 같을 때만 재사용하며 `--no-transcript-cache`로 강제 재실행할 수 있다.
 - STT에 한국어 verbatim prompt와 previous-text conditioning을 전달하고, timestamp가 없는 단어를 0초로 넣지 않도록 수정했다.
 - Whisper `max_new_tokens=256` 상한은 유지하되, 토큰 상한/비정상 early end 의심 시 해당 WAV 구간만 작은 chunk로 재시도하고 manifest 진단에 기록한다.
@@ -144,7 +147,7 @@
 - UNC URI는 생성되지만, Premiere에서 실패하면 네트워크 드라이브 문자 매핑이 필요하다.
 - Whisper large-v3는 VRAM 사용량이 크다. 이 포트는 모델을 자동 하향하지 않는다.
 - acoustic filler, breath, multicam, shorts, 자동 카메라 전환은 검토용/보조 산출물이며 원본의 모든 자동화 품질과 동일하다고 표시하지 않는다.
-- Premiere 자동 렌더링은 JSX 생성/실행기까지 지원하지만, 실제 Adobe 앱 내부 렌더 결과는 수동 검증해야 한다.
+- Premiere 자동 렌더링은 JSX 생성까지 지원한다. Windows Premiere Pro는 명령줄 JSX 자동 실행을 지원하지 않으므로 실제 Adobe 앱 내부 import/render 결과는 수동 검증해야 한다.
 
 ## 테스트 방법
 
@@ -160,6 +163,8 @@
 - 한글/공백/특수문자 URI
 - UNC URI
 - FCP7 XML 파싱과 media URI 확인
+- FCP7 XML pathurl -> Windows path 역복원과 파일 존재 확인
+- literal/encoded Premiere pathurl 비교 XML 생성
 - 같은 파일명 output collision
 - `--limit-seconds` 전체 파이프라인 전달
 - CLI 오류 메시지 traceback 억제
@@ -183,7 +188,7 @@
 - Premiere Pro에서 `*_cut.xml` import
 - Premiere Pro에서 SRT/ASS/VTT 자막 import
 - Premiere Pro에서 UNC media path가 정상 relink/import 되는지
-- Premiere Pro에서 `premiere-script`가 생성한 JSX import/export가 실제로 실행되는지
+- Premiere Pro 내부에서 `premiere-script`가 생성한 JSX import/export가 실제로 실행되는지
 - 자동 카메라 전환 XML의 컷 선택이 의도한 편집 감각과 맞는지
 - 실제 긴 영상의 컷 품질
 - 실제 NVIDIA GPU에서 full Whisper STT 성능과 VRAM 여유

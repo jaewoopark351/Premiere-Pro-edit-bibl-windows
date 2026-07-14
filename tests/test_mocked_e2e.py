@@ -121,7 +121,7 @@ def test_mocked_stt_e2e_generates_limited_xml_srt_and_manifest(monkeypatch):
     assert manifest["limit_seconds"] == 1.0
     assert "claude_context_md" in manifest["files"]
     assert manifest["metadata"]["claude"]["workspace"]["dir"].endswith(str(Path("_workspace") / media.stem))
-    # Premiere's FCP7 importer needs literal (non-percent-encoded) Korean text
-    # in pathurl to auto-locate media; see paths.premiere_fcp7_pathurl.
+    # Premiere's FCP7 importer auto-links Windows drive media with the
+    # opaque file:C:/... pathurl form and literal Korean text.
     assert "한글" in xml_text
     assert "%ED%95%9C" not in xml_text

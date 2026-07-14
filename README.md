@@ -222,7 +222,28 @@ dry-run:
 5. XML의 media path가 원본 영상을 가리키는지 확인합니다.
 6. 컷과 자막을 수동 검토한 뒤 Premiere에서 최종 렌더링합니다.
 
-네트워크 UNC 경로는 `file://NAS/share/...` URI로 생성됩니다. Premiere 환경에서 UNC import가 불안정하면 네트워크 공유를 드라이브 문자로 매핑한 뒤 실행하세요.
+로컬 드라이브 경로는 Premiere Pro 2024에서 수동 검증된 FCP7 형식인 `file:C:/Videos/clip.mp4`로 생성됩니다.
+표준 `file:///C:/...` URI는 Premiere가 `\\C:\...` 형태의 깨진 경로로 해석할 수 있어 기본값으로 쓰지 않습니다.
+네트워크 UNC 경로는 `file://NAS/share/...` 형식으로 생성됩니다. Premiere 환경에서 UNC import가 불안정하면 네트워크 공유를 드라이브 문자로 매핑한 뒤 실행하세요.
+
+XML import 시 Premiere Pro가 미디어 연결 창을 띄우면 먼저 XML의 pathurl이 실제 파일로 복원되는지 검사합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli validate-xml ".\output\my_video_cut.xml" --media ".\input\my_video.mp4" --clean-audio ".\output\my_video_cut_audio.wav"
+```
+
+경로 인코딩/URI 형식을 비교하려면 같은 영상의 1초짜리 최소 재현 XML을 여러 변형으로 생성합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli premiere-path-tests ".\input\my_video.mp4"
+```
+
+생성되는 `*_literal_path_test.xml`, `*_encoded_path_test.xml`, `*_legacy_drive_literal_path_test.xml`,
+`*_legacy_drive_encoded_path_test.xml`, `*_localhost_literal_path_test.xml`, `*_localhost_encoded_path_test.xml`,
+`*_localhost_colon_encoded_path_test.xml`을 Premiere Pro에 각각 import해서 어느 쪽이 자동 연결되는지 확인합니다.
+`*_literal_path_test.xml`은 기본 정책인 `file:C:/...` 리터럴 경로를 사용합니다. 나머지는 표준 URI,
+`file://C:/...`, `file://localhost/...` 회귀 비교용입니다. 자동 테스트는 파일 존재와 URI 복원까지 검증하지만
+Premiere GUI import 성공은 수동 검증 항목입니다.
 
 ## 추가 명령
 
@@ -274,6 +295,8 @@ Premiere 실행:
 .\.venv\Scripts\python.exe -B -m bibl_windows.cli premiere-launch --script ".\output\my_video_premiere_import.jsx"
 ```
 
+Windows용 Premiere Pro는 After Effects의 `-r script.jsx` 같은 명령줄 JSX 자동 실행 스위치를 지원하지 않습니다. 따라서 `premiere-launch --script`는 스크립트 파일 존재 여부를 확인하고 Premiere만 실행한 뒤 수동 실행 안내를 출력합니다. 새 프로젝트를 만든 뒤 `File > Import`로 `*_cut.xml`과 자막을 직접 가져오거나, 사용 중인 Premiere 버전에 스크립트 실행 메뉴가 있으면 생성된 JSX를 Premiere 내부에서 실행하세요.
+
 폴더 일괄 처리:
 
 ```powershell
@@ -288,13 +311,13 @@ powershell -ExecutionPolicy Bypass -File .\batch.ps1 -InputDirectory ".\input" -
 .\.venv\Scripts\python.exe -B -m pytest -q
 ```
 
-현재 테스트에는 Windows URI, 한글/공백/특수문자 경로, UNC URI, output collision, 전체 pipeline limit 전달, aggressive 자동 삭제 정책, 기본 clean WAV/natural, STT prompt/timestamp 처리, transcript cache, rejected XML/review JSON, CLI 오류 메시지, FCP7 XML 파싱, mocked STT E2E가 포함됩니다.
+현재 테스트에는 Windows URI, 한글/공백/특수문자 경로, UNC URI, FCP7 XML pathurl 복원/파일 존재 검증, output collision, 전체 pipeline limit 전달, aggressive 자동 삭제 정책, 기본 clean WAV/natural, STT prompt/timestamp 처리, transcript cache, rejected XML/review JSON, CLI 오류 메시지, FCP7 XML 파싱, mocked STT E2E가 포함됩니다.
 
 ## 알려진 제한
 
 - Premiere Pro GUI import와 최종 렌더링은 수동 검증이 필요합니다.
 - XML/SRT 생성은 자동 테스트하지만 Premiere 내부 해석 결과까지 자동 보장하지는 않습니다.
 - 자동 카메라 전환은 휴리스틱 기반이므로 컷마다 사람이 최종 확인해야 합니다.
-- Premiere 자동 렌더링은 JSX 생성/실행기까지 제공하며, 실제 Adobe Premiere Pro/Media Encoder 동작은 설치 버전과 preset에 따라 수동 검증해야 합니다.
+- Premiere 자동 렌더링은 JSX 생성까지 제공합니다. Windows Premiere Pro는 명령줄 JSX 자동 실행을 지원하지 않아 `premiere-launch --script`는 Premiere만 열고 수동 실행 안내를 출력합니다.
 - STT 정확도와 컷 품질은 영상 음질, 배경음악, 발화 스타일에 따라 달라집니다.
 - source video는 수정하지 않습니다. 모든 산출물은 `output` 아래에 생성됩니다.

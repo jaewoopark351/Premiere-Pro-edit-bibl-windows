@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable, Literal
 from xml.sax.saxutils import escape
 
 from ..media_probe import MediaInfo
@@ -18,26 +19,36 @@ def _rate_xml(fps: float) -> str:
     return f"<rate><timebase>{timebase}</timebase><ntsc>{ntsc}</ntsc></rate>"
 
 
-def build_fcp7_xml(media: MediaInfo, keeps: list[TimeRange], sequence_name: str, clean_audio: Path | None = None) -> str:
+PathUrlFactory = Callable[[Path], str]
+VideoFileMediaMode = Literal["full", "video-only", "none"]
+
+
+def build_fcp7_xml(
+    media: MediaInfo,
+    keeps: list[TimeRange],
+    sequence_name: str,
+    clean_audio: Path | None = None,
+    *,
+    pathurl_factory: PathUrlFactory = premiere_fcp7_pathurl,
+    video_file_media: VideoFileMediaMode = "full",
+) -> str:
     fps = media.video.fps
     rate = _rate_xml(fps)
     total_frames = _frames(media.duration, fps)
-    video_uri = escape(premiere_fcp7_pathurl(media.path))
+    video_uri = escape(pathurl_factory(media.path))
     video_name = escape(media.path.name)
     use_clean_audio = clean_audio is not None
-    audio_uri = escape(premiere_fcp7_pathurl(clean_audio)) if clean_audio else video_uri
+    audio_uri = escape(pathurl_factory(clean_audio)) if clean_audio else video_uri
     audio_name = escape(clean_audio.name) if clean_audio else video_name
 
+    video_media = _video_file_media_xml(media, rate, video_file_media)
     video_file = f"""
             <file id="file-video">
               <name>{video_name}</name>
               <pathurl>{video_uri}</pathurl>
               {rate}
               <duration>{total_frames}</duration>
-              <media>
-                <video><samplecharacteristics>{rate}<width>{media.video.width}</width><height>{media.video.height}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>
-                <audio><samplecharacteristics><depth>16</depth><samplerate>{media.audio.sample_rate}</samplerate></samplecharacteristics><channelcount>{media.audio.channels}</channelcount></audio>
-              </media>
+              {video_media}
             </file>"""
     audio_file = f"""
             <file id="file-audio">
@@ -109,3 +120,22 @@ def build_fcp7_xml(media: MediaInfo, keeps: list[TimeRange], sequence_name: str,
   </sequence>
 </xmeml>
 """
+
+
+def _video_file_media_xml(media: MediaInfo, rate: str, mode: VideoFileMediaMode) -> str:
+    video_xml = (
+        f"<video><samplecharacteristics>{rate}<width>{media.video.width}</width>"
+        f"<height>{media.video.height}</height><pixelaspectratio>square</pixelaspectratio>"
+        "</samplecharacteristics></video>"
+    )
+    audio_xml = (
+        f"<audio><samplecharacteristics><depth>16</depth><samplerate>{media.audio.sample_rate}</samplerate>"
+        f"</samplecharacteristics><channelcount>{media.audio.channels}</channelcount></audio>"
+    )
+    if mode == "full":
+        return f"<media>{video_xml}{audio_xml}</media>"
+    if mode == "video-only":
+        return f"<media>{video_xml}</media>"
+    if mode == "none":
+        return ""
+    raise ValueError(f"Unsupported video file media mode: {mode}")

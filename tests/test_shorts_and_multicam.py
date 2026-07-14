@@ -32,7 +32,7 @@ def test_short_range_rejects_negative_start():
 def test_vertical_xml_uses_9x16_sequence():
     xml = build_vertical_xml(sample_media(), TimeRange(1, 3), "short")
     assert "<width>1080</width><height>1920</height>" in xml
-    assert "file:///C:/" in xml
+    assert "file:C:/" in xml
 
 
 def test_multicam_xml_contains_multiple_tracks():

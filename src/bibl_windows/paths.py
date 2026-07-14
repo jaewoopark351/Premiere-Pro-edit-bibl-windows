@@ -67,16 +67,12 @@ _URI_MUST_ESCAPE = re.compile(r'[ %#?\x00-\x1f]')
 
 
 def _relax_non_ascii_uri_escaping(uri: str) -> str:
-    """Un-escape percent-encoded non-ASCII path segments in a file:// URI.
+    """Un-escape percent-encoded non-ASCII text in comparison file:// URIs.
 
-    `Path.as_uri()` percent-encodes every non-ASCII byte per RFC 3986, which is
-    correct but Adobe Premiere Pro's FCP7 XML importer fails to auto-locate
-    media whose `pathurl` uses percent-encoded Korean/CJK text (confirmed by
-    hand: an XML with the same path written as literal UTF-8 auto-links, the
-    percent-encoded version always prompts a manual "Locate Media" dialog).
-    Decoding back to literal characters and only re-escaping the handful of
-    ASCII characters that are unsafe in a URI keeps Premiere's importer happy
-    without touching UNC/drive-letter handling from `as_uri()`.
+    The confirmed Premiere FCP7 default is produced by
+    ``premiere_fcp7_pathurl``. This helper is retained for pathurl comparison
+    XMLs that still need a hierarchical ``file://...`` form with readable Korean
+    text.
     """
     decoded = urllib.parse.unquote(uri, encoding="utf-8", errors="strict")
     return _URI_MUST_ESCAPE.sub(lambda m: f"%{ord(m.group(0)):02X}", decoded)
@@ -96,7 +92,74 @@ def standards_compliant_file_uri(path: Path) -> str:
 
 
 def premiere_fcp7_pathurl(path: Path) -> str:
-    return _relax_non_ascii_uri_escaping(standards_compliant_file_uri(path))
+    """Return the pathurl form Premiere Pro 2024 auto-links in FCP7 XML.
+
+    Manual import testing on Windows showed that Premiere's FCP7 XML importer
+    treats the RFC 8089 drive URI form (``file:///C:/...``) as a malformed
+    local-drive-as-UNC path. The form that auto-linked in a completely fresh
+    Premiere Pro 2024 project was the older FCP7-style opaque file path,
+    ``file:C:/...``, with spaces and Korean text left literal. UNC paths still
+    naturally become ``file://server/share/...``.
+    """
+    resolved = path if path.is_absolute() else path.resolve()
+    text = str(resolved).replace("\\", "/")
+    if re.match(r"^[A-Za-z]:/", text) or text.startswith("//"):
+        return "file:" + text
+    raise PathSafetyError(
+        "Could not convert media path to a Premiere FCP7 pathurl: "
+        + str(resolved)
+        + "\nUse an absolute drive path such as C:\\Videos\\clip.mp4. "
+        + "For network shares, map the share to a drive letter if Premiere cannot import the UNC pathurl."
+    )
+
+
+def localhost_file_uri(path: Path, *, encoded: bool = True, encode_drive_colon: bool = False) -> str:
+    uri = standards_compliant_file_uri(path)
+    if uri.startswith("file://") and not uri.startswith("file:///"):
+        return uri
+    if not uri.startswith("file:///"):
+        raise PathSafetyError(f"Could not convert local path to localhost file URI: {path}")
+    tail = uri[len("file:///") :]
+    if encode_drive_colon:
+        tail = tail.replace(":", "%3A", 1)
+    localhost_uri = "file://localhost/" + tail
+    return localhost_uri if encoded else _relax_non_ascii_uri_escaping(localhost_uri)
+
+
+def premiere_legacy_drive_file_uri(path: Path, *, encoded: bool = True) -> str:
+    """Return a Premiere FCP7 test URI like ``file://C:/path`` for drive paths.
+
+    This is intentionally not the standards-compliant URI produced by
+    ``Path.as_uri()``. It exists only as a Premiere importer compatibility
+    candidate for cases where Premiere displays a local drive URI with a
+    malformed leading UNC prefix.
+    UNC paths already use the two-slash ``file://server/share`` form and should
+    keep the standard conversion.
+    """
+    uri = standards_compliant_file_uri(path)
+    if uri.startswith("file://") and not uri.startswith("file:///"):
+        return uri
+    if not uri.startswith("file:///"):
+        raise PathSafetyError(f"Could not convert local path to legacy drive file URI: {path}")
+    legacy_uri = "file://" + uri[len("file:///") :]
+    return legacy_uri if encoded else _relax_non_ascii_uri_escaping(legacy_uri)
+
+
+def file_uri_to_windows_path(uri: str) -> Path:
+    opaque_drive = re.match(r"^file:([A-Za-z]:[/\\].*)$", uri, flags=re.IGNORECASE)
+    if opaque_drive:
+        return Path(opaque_drive.group(1).replace("/", "\\"))
+    parsed = urllib.parse.urlsplit(uri)
+    if parsed.scheme.lower() != "file":
+        raise PathSafetyError(f"pathurl is not a file URI: {uri}")
+    decoded_path = urllib.parse.unquote(parsed.path, encoding="utf-8", errors="strict")
+    if re.fullmatch(r"[A-Za-z]:", parsed.netloc):
+        return Path((parsed.netloc + decoded_path).replace("/", "\\"))
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        return Path("\\\\" + parsed.netloc + decoded_path.replace("/", "\\"))
+    if decoded_path.startswith("/") and len(decoded_path) >= 3 and decoded_path[2] == ":":
+        decoded_path = decoded_path[1:]
+    return Path(decoded_path.replace("/", "\\"))
 
 
 def windows_file_uri(path: Path) -> str:

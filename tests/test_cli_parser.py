@@ -118,6 +118,28 @@ def test_parser_accepts_premiere_script_command():
     assert args.export_mp4 == "render.mp4"
 
 
+def test_parser_accepts_validate_xml_command():
+    args = build_parser().parse_args(["validate-xml", "out.xml", "--media", "media.mp4", "--clean-audio", "clean.wav"])
+    assert args.command == "validate-xml"
+    assert args.media == "media.mp4"
+    assert args.clean_audio == "clean.wav"
+
+
+def test_parser_accepts_premiere_path_tests_command():
+    args = build_parser().parse_args(["premiere-path-tests", "media.mp4", "--duration-seconds", "2"])
+    assert args.command == "premiere-path-tests"
+    assert args.duration_seconds == 2
+
+
+def test_parser_accepts_premiere_structure_tests_command():
+    args = build_parser().parse_args(
+        ["premiere-structure-tests", "media.mp4", "--clean-audio", "clean.wav", "--duration-seconds", "2"]
+    )
+    assert args.command == "premiere-structure-tests"
+    assert args.clean_audio == "clean.wav"
+    assert args.duration_seconds == 2
+
+
 def test_parser_accepts_premiere_launch_command():
     args = build_parser().parse_args(["premiere-launch", "--xml", "out.xml"])
     assert args.command == "premiere-launch"
