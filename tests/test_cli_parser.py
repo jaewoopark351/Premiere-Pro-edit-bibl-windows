@@ -66,6 +66,16 @@ def test_run_parser_accepts_output_controls():
     assert args.overwrite
 
 
+def test_run_parser_accepts_no_transcript_cache():
+    args = build_parser().parse_args(["run", "sample.mp4", "--no-transcript-cache"])
+    assert args.no_transcript_cache
+
+
+def test_transcribe_parser_accepts_no_transcript_cache():
+    args = build_parser().parse_args(["transcribe", "sample.mp4", "--no-transcript-cache"])
+    assert args.no_transcript_cache
+
+
 def test_parser_accepts_shorts_command():
     args = build_parser().parse_args(["shorts", "sample.mp4", "00:01-00:05", "--transcript", "out.json"])
     assert args.command == "shorts"

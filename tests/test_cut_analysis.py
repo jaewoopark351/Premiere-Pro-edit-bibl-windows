@@ -1,4 +1,4 @@
-from bibl_windows.analysis.cuts import repeated_speech_candidates, silence_candidates
+from bibl_windows.analysis.cuts import false_start_candidates, repeated_speech_candidates, silence_candidates
 from bibl_windows.timeline.models import TimeRange, TranscriptWord
 
 
@@ -14,3 +14,28 @@ def test_repeated_speech_candidate():
     assert len(candidates) == 1
     assert candidates[0].reason == "repeated_word"
 
+
+def test_repeated_phrase_candidate():
+    words = [
+        TranscriptWord(1.0, 1.2, "hello"),
+        TranscriptWord(1.25, 1.5, "world"),
+        TranscriptWord(1.65, 1.85, "hello"),
+        TranscriptWord(1.9, 2.1, "world"),
+    ]
+
+    candidates = repeated_speech_candidates(words, max_gap=0.5, pad=0.01)
+
+    assert any(candidate.reason == "repeated_phrase" for candidate in candidates)
+
+
+def test_false_start_prefix_candidate_requires_review():
+    words = [
+        TranscriptWord(1.0, 1.15, "record"),
+        TranscriptWord(1.2, 1.55, "recording"),
+    ]
+
+    candidates = false_start_candidates(words, max_gap=0.5, pad=0.01, ratio=0.75)
+
+    assert len(candidates) == 1
+    assert candidates[0].reason == "false_start_prefix"
+    assert candidates[0].requires_review is True

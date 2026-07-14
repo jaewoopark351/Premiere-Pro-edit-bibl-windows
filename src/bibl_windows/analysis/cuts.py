@@ -71,6 +71,27 @@ def silence_candidates(
 def repeated_speech_candidates(words: list[TranscriptWord], max_gap: float, pad: float) -> list[CutCandidate]:
     out: list[CutCandidate] = []
     tokens = [_norm(w.text) for w in words]
+    for size in (4, 3, 2):
+        idx = 0
+        while idx + size * 2 <= len(words):
+            first = tokens[idx : idx + size]
+            second = tokens[idx + size : idx + size * 2]
+            gap = words[idx + size].start - words[idx + size - 1].end
+            if all(first) and first == second and gap <= max_gap:
+                out.append(
+                    CutCandidate(
+                        start=max(0.0, words[idx].start - pad),
+                        end=min(words[idx + size].start, words[idx + size - 1].end + pad),
+                        reason="repeated_phrase",
+                        confidence=0.84,
+                        auto_delete=True,
+                        requires_review=False,
+                        metadata={"text": " ".join(w.text for w in words[idx : idx + size]), "words": size},
+                    )
+                )
+                idx += size * 2
+            else:
+                idx += 1
     idx = 0
     while idx < len(words) - 1:
         cur = tokens[idx]
@@ -95,6 +116,30 @@ def repeated_speech_candidates(words: list[TranscriptWord], max_gap: float, pad:
 def false_start_candidates(words: list[TranscriptWord], max_gap: float, pad: float, ratio: float) -> list[CutCandidate]:
     out: list[CutCandidate] = []
     tokens = [_norm(w.text) for w in words]
+    for idx in range(len(words) - 1):
+        first = tokens[idx]
+        second = tokens[idx + 1]
+        gap = words[idx + 1].start - words[idx].end
+        is_prefix_restart = (
+            first
+            and second
+            and first != second
+            and gap <= max_gap
+            and min(len(first), len(second)) >= 2
+            and (first.startswith(second) or second.startswith(first))
+        )
+        if is_prefix_restart:
+            out.append(
+                CutCandidate(
+                    start=max(0.0, words[idx].start - pad),
+                    end=words[idx].end + pad,
+                    reason="false_start_prefix",
+                    confidence=0.68,
+                    auto_delete=False,
+                    requires_review=True,
+                    metadata={"first": words[idx].text, "second": words[idx + 1].text},
+                )
+            )
     for size in (4, 3, 2):
         idx = 0
         while idx + size * 2 <= len(words):

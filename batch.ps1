@@ -12,6 +12,7 @@ param(
   [switch]$CleanWav,
   [switch]$NoExtraExports,
   [switch]$NoAdvancedAudioAnalysis,
+  [switch]$NoTranscriptCache,
   [switch]$Overwrite,
   [switch]$DryRun
 )
@@ -50,6 +51,7 @@ foreach ($File in $Files) {
   if ($CleanWav) { $ArgsList += "--clean-wav" }
   if ($NoExtraExports) { $ArgsList += "--no-extra-exports" }
   if ($NoAdvancedAudioAnalysis) { $ArgsList += "--no-advanced-audio-analysis" }
+  if ($NoTranscriptCache) { $ArgsList += "--no-transcript-cache" }
   if ($Overwrite) { $ArgsList += "--overwrite" }
   if ($DryRun) { $ArgsList += "--dry-run" }
   if ($DebugPreference -ne "SilentlyContinue") { $ArgsList += "--debug" }

@@ -24,6 +24,10 @@ def write_report(path: Path, title: str, candidates: list[CutCandidate], summary
         ("Deletion ranges", str(summary.get("deletion_ranges", "unknown"))),
         ("Auto candidates", str(summary.get("auto_delete_candidates", 0))),
         ("Review candidates", str(summary.get("review_candidates", 0))),
+        ("Audio preset", str(summary.get("audio_preset", "standard"))),
+        ("Noise floor", _optional_db(summary.get("noise_floor_db"))),
+        ("Breath ranges", str(summary.get("breath_ranges", 0))),
+        ("Choppy sections", str(len(summary.get("choppy_sections", [])))),
     ]
     stat_rows = "\n".join(
         f"<tr><th>{escape(label)}</th><td>{escape(value)}</td></tr>"
@@ -39,6 +43,8 @@ def write_report(path: Path, title: str, candidates: list[CutCandidate], summary
         "</tr>"
         for c in candidates
     )
+    deletion_rows = _range_rows(summary.get("rejected_ranges", []))
+    choppy_rows = _range_rows(summary.get("choppy_sections", []))
     html = f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -64,7 +70,42 @@ def write_report(path: Path, title: str, candidates: list[CutCandidate], summary
     <thead><tr><th>Time</th><th>Reason</th><th>Confidence</th><th>Auto delete</th><th>Review</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  <h2>Rejected Ranges</h2>
+  <p>These source ranges are removed from the rough-cut XML and exported separately for review.</p>
+  <table>
+    <thead><tr><th>Time</th><th>Duration</th></tr></thead>
+    <tbody>{deletion_rows}</tbody>
+  </table>
+  <h2>Choppy Sections</h2>
+  <p>Dense cut clusters that should be checked manually before final delivery.</p>
+  <table>
+    <thead><tr><th>Time</th><th>Duration</th></tr></thead>
+    <tbody>{choppy_rows}</tbody>
+  </table>
 </body>
 </html>
 """
     path.write_text(html, encoding="utf-8", newline="\n")
+
+
+def _optional_db(value: object) -> str:
+    if value is None:
+        return "not measured"
+    try:
+        return f"{float(value):.2f} dB"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _range_rows(ranges: object) -> str:
+    if not isinstance(ranges, list) or not ranges:
+        return '<tr><td colspan="2">none</td></tr>'
+    rows: list[str] = []
+    for item in ranges:
+        if not isinstance(item, dict):
+            continue
+        start = float(item.get("start", 0.0))
+        end = float(item.get("end", start))
+        duration = float(item.get("duration", max(0.0, end - start)))
+        rows.append(f"<tr><td>{_tc(start)} - {_tc(end)}</td><td>{duration:.2f}s</td></tr>")
+    return "\n".join(rows) if rows else '<tr><td colspan="2">none</td></tr>'

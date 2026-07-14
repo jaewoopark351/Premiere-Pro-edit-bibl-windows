@@ -43,7 +43,47 @@ class TranscriptResult:
         }
 
 
+def transcript_result_from_dict(data: dict) -> TranscriptResult:
+    segments = [
+        TranscriptSegment(
+            start=float(segment["start"]),
+            end=float(segment["end"]),
+            text=str(segment.get("text", "")),
+            words=[
+                TranscriptWord(
+                    start=float(word["start"]),
+                    end=float(word["end"]),
+                    text=str(word.get("text", "")),
+                    confidence=word.get("confidence"),
+                )
+                for word in segment.get("words", [])
+            ],
+        )
+        for segment in data.get("segments", [])
+    ]
+    words = [
+        TranscriptWord(
+            start=float(word["start"]),
+            end=float(word["end"]),
+            text=str(word.get("text", "")),
+            confidence=word.get("confidence"),
+        )
+        for word in data.get("words", [])
+    ]
+    return TranscriptResult(
+        source_audio=str(data.get("source_audio", "")),
+        backend=str(data.get("backend", "unknown")),
+        model=str(data.get("model", "")),
+        language=str(data.get("language", "")),
+        device=str(data.get("device", "unknown")),
+        text=str(data.get("text", "")),
+        segments=segments,
+        words=words,
+        warnings=[str(item) for item in data.get("warnings", [])],
+        validation_issues=[str(item) for item in data.get("validation_issues", [])],
+    )
+
+
 class SttBackend(Protocol):
     def transcribe(self, audio_path: Path, language: str, allow_cpu_fallback: bool) -> TranscriptResult:
         ...
-

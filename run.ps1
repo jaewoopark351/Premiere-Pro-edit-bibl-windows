@@ -13,6 +13,7 @@ param(
   [switch]$CleanWav,
   [switch]$NoExtraExports,
   [switch]$NoAdvancedAudioAnalysis,
+  [switch]$NoTranscriptCache,
   [switch]$Overwrite,
   [switch]$DryRun
 )
@@ -47,6 +48,7 @@ if ($AllowCpuFallback) { $ArgsList += "--allow-cpu-fallback" }
 if ($CleanWav) { $ArgsList += "--clean-wav" }
 if ($NoExtraExports) { $ArgsList += "--no-extra-exports" }
 if ($NoAdvancedAudioAnalysis) { $ArgsList += "--no-advanced-audio-analysis" }
+if ($NoTranscriptCache) { $ArgsList += "--no-transcript-cache" }
 if ($Overwrite) { $ArgsList += "--overwrite" }
 if ($DryRun) { $ArgsList += "--dry-run" }
 if ($DebugPreference -ne "SilentlyContinue") { $ArgsList += "--debug" }

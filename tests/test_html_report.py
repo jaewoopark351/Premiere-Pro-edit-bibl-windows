@@ -33,6 +33,8 @@ def test_html_report_includes_timeline_summary():
                 "deletion_ranges": 1,
                 "auto_delete_candidates": 1,
                 "review_candidates": 0,
+                "rejected_ranges": [{"start": 1.0, "end": 2.0, "duration": 1.0}],
+                "choppy_sections": [],
             },
         )
 
@@ -40,6 +42,8 @@ def test_html_report_includes_timeline_summary():
         assert "Edited duration" in html
         assert "8.00s" in html
         assert "Review candidates" in html
+        assert "Rejected Ranges" in html
+        assert "00:00:01.00 - 00:00:02.00" in html
     finally:
         if out.exists():
             out.unlink()

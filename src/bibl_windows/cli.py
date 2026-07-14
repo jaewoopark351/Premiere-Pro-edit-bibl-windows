@@ -125,6 +125,7 @@ def cmd_transcribe(args: argparse.Namespace) -> int:
         stt_chunk_seconds=args.stt_chunk_seconds,
         limit_seconds=args.limit_seconds,
         allow_cpu_fallback=args.allow_cpu_fallback,
+        reuse_transcript_cache=not args.no_transcript_cache,
         command=sys.argv,
     )
     result, transcript_json, stt_audio = pipeline.transcribe(options)
@@ -188,6 +189,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         output_dir=args.output_dir,
         output_name=args.output_name,
         overwrite=args.overwrite,
+        reuse_transcript_cache=not args.no_transcript_cache,
         command=sys.argv,
     )
     if args.dry_run:
@@ -434,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--stt-batch-size", type=int, default=1)
     transcribe.add_argument("--stt-chunk-seconds", type=float, default=25.0)
     transcribe.add_argument("--allow-cpu-fallback", action="store_true")
+    transcribe.add_argument("--no-transcript-cache", action="store_true", help="force Whisper even if a matching transcript JSON exists")
     transcribe.set_defaults(func=cmd_transcribe)
 
     analyze = sub.add_parser("analyze-cuts")
@@ -489,6 +492,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--audio-preset", default="standard", choices=AUDIO_PRESETS)
     run.add_argument("--no-extra-exports", action="store_true")
     run.add_argument("--no-advanced-audio-analysis", action="store_true")
+    run.add_argument("--no-transcript-cache", action="store_true", help="force Whisper even if a matching transcript JSON exists")
     run.add_argument("--output-dir", help="relative subdirectory under output")
     run.add_argument("--output-name", help="base name for generated artifacts")
     run.add_argument("--overwrite", action="store_true", help="reuse the requested output base even if a manifest exists")

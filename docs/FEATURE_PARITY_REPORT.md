@@ -48,8 +48,11 @@
 - `*_cut.srt`, `*_cut.vtt`, `*_cut.ass`, `*_cut_emphasis.ass`
 - `*_transcript.md`, `*_transcript.txt`, `*_transcript.csv`
 - `*_edit_diff.json`, `*_edit_diff.md`
+- `*_cut_review.json`
+- `*_rejected.xml`
 - `*_report.html`
 - `*_cut_audio.wav` 선택
+- `*_audio_loudness.json` 조건부
 - `*_breath_ranges.json` 조건부
 - `*_manifest.json`
 
@@ -57,11 +60,11 @@
 
 | 기능 | 관련 원본 파일 | 관련 Windows 파일 | Windows 실제 호출 여부 | 분류 | 차이가 발생하는 이유 | 포팅 난이도 | 테스트 방법 |
 |---|---|---|---:|---|---|---|---|
-| Whisper 음성 인식 | `engine/make_subtitles.py`, `engine/auto_cut.py` | `stt/transformers_whisper.py`, `pipeline.py` | 예 | 부분 구현 | 원본은 `mlx-whisper`, Windows는 Transformers/PyTorch CUDA. cache/prompt 세부가 다름 | 중간 | mocked E2E, 실제 STT smoke |
-| 한국어 STT | `make_subtitles.py` | `cli.py`, `transformers_whisper.py` | 예 | 부분 구현 | 기본 `ko` 지정은 있으나 원본 prompt와 완전히 같지 않음 | 쉬움 | Korean filename/input dry-run, 실제 STT |
+| Whisper 음성 인식 | `engine/make_subtitles.py`, `engine/auto_cut.py` | `stt/transformers_whisper.py`, `pipeline.py` | 예 | 부분 구현 | 원본은 `mlx-whisper`, Windows는 Transformers/PyTorch CUDA. transcript cache는 지원하지만 prompt 세부는 원본과 다름 | 중간 | mocked E2E, transcript cache test, 실제 STT smoke |
+| 한국어 STT | `make_subtitles.py` | `cli.py`, `transformers_whisper.py` | 예 | 부분 구현 | 기본 `ko` 지정과 large-v3 CUDA 실행을 지원. 원본 prompt와 완전히 같지는 않음 | 쉬움 | Korean filename/input dry-run, 실제 STT |
 | 무음 감지 | `silence_cut.py` | `ffmpeg_tools.detect_silence`, `pipeline.analyze_cuts` | 예 | 부분 구현 | FFmpeg silencedetect 기반이나 원본 keep 중심 세부와 다름 | 쉬움 | mocked E2E |
-| 반복 발화 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 부분 구현 | Windows 휴리스틱이 더 보수적 | 중간 | unit test 추가 권장 |
-| false-start 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 검토용 구현 | 후보는 만들지만 자동 삭제보다는 review 중심 | 중간 | 후보 JSON 확인 |
+| 반복 발화 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 부분 구현 | 단어 반복과 짧은 구절 반복을 감지하지만 Windows 휴리스틱이 더 보수적 | 중간 | cut analysis tests |
+| false-start 감지 | `auto_cut.py` | `analysis/cuts.py` | 예 | 검토용 구현 | prefix restart와 유사 구절 후보를 만들지만 자동 삭제보다는 review 중심 | 중간 | 후보 JSON 확인, cut analysis tests |
 | 어/음 필러 감지 | `auto_cut.py`, `config.py` | `analysis/cuts.py` | 예 | 검토용 구현 | 텍스트 기반 후보 중심 | 중간 | 후보 JSON 확인 |
 | 음향 기반 필러 감지 | `acoustic_filler.py` | `analysis/acoustic.py`, `pipeline.analyze_cuts` | 예 | 검토용 구현 | 원본 aggressive 삭제와 달리 review signal 중심 | 중간 | audio feature unit test |
 | 문장 끝 음절 보호 | `auto_cut.word_snap()` | `timeline/protection.py`, `pipeline.export` | 예 | 부분 구현 | silence 기반 자동 삭제 경계 보호 중심 | 중간 | timeline protection tests |
@@ -70,7 +73,7 @@
 | 노이즈 제거 | `auto_cut.py` | `audio/presets.py`, `ffmpeg_tools.py` | 예 | 부분 구현 | FFmpeg `afftdn` clean WAV 중심 | 쉬움 | FFmpeg filter smoke |
 | 하이패스 필터 | `silence_cut.py` | `audio/presets.py` | 예 | 완전 구현 | clean WAV filter chain | 쉬움 | filter chain test |
 | 컴프레서 | `silence_cut.py` | `audio/presets.py` | 예 | 완전 구현 | clean WAV filter chain | 쉬움 | filter chain test |
-| LUFS 정규화 | `silence_cut.py` | `audio/presets.py` | 예 | 부분 구현 | loudnorm filter는 있으나 전후 LUFS 리포트는 제한적 | 쉬움 | filter chain test |
+| LUFS 정규화 | `silence_cut.py` | `audio/presets.py`, `pipeline.export`, `video/analyze.py` | 예 | 부분 구현 | clean WAV loudnorm filter와 전후 loudnorm sidecar를 제공하지만 원본 세팅과 완전 동일하지는 않음 | 쉬움 | filter chain test, clean WAV smoke |
 | 치찰음 감소 | `auto_cut.py` | `audio/presets.py` | 예 | 부분 구현 | FFmpeg deesser 사용. 원본 세팅과 완전 동일하지 않음 | 쉬움 | filter chain test |
 | natural/podcast 프리셋 | `auto_cut.py` | `audio/presets.py`, `cli.py` | 예 | 부분 구현 | Windows filter preset으로 재구현 | 중간 | parser/filter tests |
 | SRT 생성 | `make_subtitles.py`, `subtitle_polish.py` | `subtitles/srt.py`, `pipeline.export` | 예 | 완전 구현 | 컷 타임라인 remap 반영 | 쉬움 | subtitle tests, mocked E2E |
@@ -82,8 +85,8 @@
 | FCP7 XML 생성 | `silence_cut.py` | `premiere/fcp7.py`, `pipeline.export` | 예 | 완전 구현 | XML 파싱 테스트 포함 | 중간 | FCP7 XML tests |
 | Premiere media path URI | `silence_cut.py` | `paths.windows_file_uri`, `premiere/fcp7.py` | 예 | 완전 구현 | `Path.as_uri()` 기반. UNC는 URI 생성, Premiere import는 환경별 수동 확인 | 중간 | URI/FCP7 tests |
 | keep range 생성 | `silence_cut.py` | `timeline/mapper.py`, `pipeline.export` | 예 | 완전 구현 | deletion -> keep mapping | 쉬움 | mapper tests |
-| 버린 컷 검토 데이터 | `auto_cut.complement()` | `cut_candidates.json`, `keep_ranges.json`, report | 예 | 부분 구현 | rejected XML은 없음 | 중간 | JSON/report 확인 |
-| HTML 리포트 | `html_report.py` | `reports/html.py` | 예 | 부분 구현 | 원본 리포트보다 간결 | 쉬움 | report tests |
+| 버린 컷 검토 데이터 | `auto_cut.complement()` | `cut_candidates.json`, `keep_ranges.json`, `cut_review.json`, `rejected.xml`, report | 예 | 완전 구현 | 삭제 구간 JSON과 버린 컷만 이어 붙인 FCP7 XML을 제공 | 중간 | JSON/report/XML parse tests |
+| HTML 리포트 | `html_report.py` | `reports/html.py` | 예 | 부분 구현 | 원본 리포트보다 간결하지만 삭제 구간과 촘촘한 컷 구간을 표시 | 쉬움 | report tests |
 | transcript export | `transcript_export.py` | `exports/transcript.py`, `pipeline.export` | 예 | 완전 구현 | MD/TXT/CSV 생성 | 쉬움 | subtitle/export tests |
 | 편집 전후 diff | `edit_diff.py` | `exports/edit_diff.py`, `pipeline.export` | 예 | 부분 구현 | 원본과 diff 관점이 다름 | 중간 | export smoke |
 | 영상 분석 | `analyze_video.py` | `video/analyze.py`, `cli analyze-video` | 예 | 부분 구현 | FFmpeg/ffprobe heuristic | 중간 | CLI smoke |
@@ -110,6 +113,10 @@
 - install/run/batch PowerShell wrapper의 입력/venv 확인과 batch 성공/실패 목록을 보강했다.
 - `auto-multicam-xml`로 자동 카메라 전환용 단일 러프컷 XML과 switch plan JSON을 생성한다.
 - `premiere-script`와 `premiere-launch`로 Premiere XML/SRT import 및 선택적 MP4 export JSX를 생성하고 Premiere 실행 진입점을 제공한다.
+- transcript cache를 추가했다. 입력 파일, 크기/mtime, 모델, 언어, chunk, STT 제한 시간이 모두 같을 때만 재사용하며 `--no-transcript-cache`로 강제 재실행할 수 있다.
+- 반복 구절 감지와 prefix false-start 감지를 추가했다.
+- `*_cut_review.json`과 `*_rejected.xml`을 추가해 버린 컷 검토 데이터를 Premiere XML로도 확인할 수 있게 했다.
+- clean WAV 생성 시 `*_audio_loudness.json`에 원본/clean WAV loudnorm 측정값을 기록한다.
 
 ## 권장 구현 순서 상태
 
@@ -146,6 +153,9 @@
 - `--limit-seconds` 전체 파이프라인 전달
 - CLI 오류 메시지 traceback 억제
 - mocked STT E2E: FFmpeg 테스트 MP4 -> STT mock -> 컷 분석 -> XML/SRT/manifest 생성
+- transcript cache reuse
+- rejected XML/review JSON export
+- repeated phrase and prefix false-start detection
 - VTT/ASS export
 - timeline protection
 - shorts/multicam helper

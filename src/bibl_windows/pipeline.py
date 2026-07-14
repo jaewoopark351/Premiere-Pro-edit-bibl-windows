@@ -16,6 +16,7 @@ from .audio.breath import detect_breath_ranges
 from .audio.features import AudioFeatureSummary, measure_noise_floor
 from .ffmpeg_tools import detect_silence, extract_audio_for_stt, make_clean_wav
 from .exports.edit_diff import summarize_edit_diff, write_edit_diff
+from .exports.review import summarize_cut_review
 from .exports.transcript import write_transcript_csv, write_transcript_markdown, write_transcript_text
 from .io_json import read_json, write_json
 from .media_probe import MediaInfo, probe_media
@@ -23,7 +24,7 @@ from .paths import ensure_inside, media_stem, safe_output_component, short_path_
 from .premiere.fcp7 import build_fcp7_xml
 from .reports.html import write_report
 from .runtime import RuntimeContext, RuntimeErrorWithHint
-from .stt.base import TranscriptResult
+from .stt.base import TranscriptResult, transcript_result_from_dict
 from .stt.transformers_whisper import SttRuntimeError, TransformersWhisperBackend
 from .subtitles.ass import write_ass
 from .subtitles.srt import group_words, polish_cues, write_srt
@@ -31,6 +32,7 @@ from .subtitles.vtt import write_vtt
 from .timeline.mapper import TimelineMapper
 from .timeline.models import CutCandidate, TimeRange, TranscriptWord
 from .timeline.protection import protected_candidate_delete_ranges
+from .video.analyze import measure_loudness
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class PipelineOptions:
     output_dir: str | None = None
     output_name: str | None = None
     overwrite: bool = False
+    reuse_transcript_cache: bool = True
     command: list[str] | None = None
 
 
@@ -73,6 +76,9 @@ class PipelineArtifacts:
     transcript_csv: Path | None = None
     edit_diff_json: Path | None = None
     edit_diff_md: Path | None = None
+    cut_review_json: Path | None = None
+    rejected_xml: Path | None = None
+    audio_loudness_json: Path | None = None
     manifest_json: Path | None = None
 
 
@@ -104,6 +110,14 @@ class WindowsEditPipeline:
         transcribe_limit = transcription_limit(options)
         suffix = "_stt_audio.wav" if transcribe_limit is None else f"_stt_{transcribe_limit:g}s.wav"
         stt_audio = layout.output_path(self.context, layout.stem + suffix)
+        transcript_json = layout.output_path(self.context, f"{layout.stem}_transcript.json")
+        cached = load_transcript_cache(transcript_json, options, transcribe_limit) if options.reuse_transcript_cache else None
+        if cached is not None:
+            if not stt_audio.exists():
+                extract_audio_for_stt(ffmpeg, options.input_path, stt_audio, transcribe_limit)
+            cached.source_audio = str(stt_audio)
+            cached.warnings.append("Reused matching transcript cache; pass --no-transcript-cache to force STT.")
+            return cached, transcript_json, stt_audio
         extract_audio_for_stt(ffmpeg, options.input_path, stt_audio, transcribe_limit)
         try:
             result = TransformersWhisperBackend(options.model).transcribe(
@@ -119,8 +133,9 @@ class WindowsEditPipeline:
                 "or rerun with `--allow-cpu-fallback` for a slow CPU check."
             )
             raise RuntimeErrorWithHint(f"STT failed while transcribing {stt_audio}: {exc}{fallback_hint}") from exc
-        transcript_json = layout.output_path(self.context, f"{layout.stem}_transcript.json")
-        write_json(transcript_json, result.to_dict())
+        payload = result.to_dict()
+        payload["metadata"] = transcript_cache_metadata(options, transcribe_limit)
+        write_json(transcript_json, payload)
         return result, transcript_json, stt_audio
 
     def dry_run(self, options: PipelineOptions) -> dict:
@@ -152,10 +167,13 @@ class WindowsEditPipeline:
             "transcript_csv": expected_path(f"{layout.stem}_transcript.csv"),
             "edit_diff_json": expected_path(f"{layout.stem}_edit_diff.json"),
             "edit_diff_md": expected_path(f"{layout.stem}_edit_diff.md"),
+            "cut_review_json": expected_path(f"{layout.stem}_cut_review.json"),
+            "rejected_xml": expected_path(f"{layout.stem}_rejected.xml"),
             "manifest_json": expected_path(f"{layout.stem}_manifest.json"),
         }
         if options.clean_wav:
             output["clean_wav"] = expected_path(f"{layout.stem}_cut_audio.wav")
+            output["audio_loudness_json"] = expected_path(f"{layout.stem}_audio_loudness.json")
 
         media = None
         media_probe_error = None
@@ -183,6 +201,7 @@ class WindowsEditPipeline:
             "output_dir": "/".join(layout.dir_parts) if layout.dir_parts else None,
             "output_name": layout.stem,
             "overwrite": options.overwrite,
+            "reuse_transcript_cache": options.reuse_transcript_cache,
             "extra_exports": options.extra_exports,
             "advanced_audio_analysis": options.advanced_audio_analysis,
             "tools": {
@@ -322,6 +341,7 @@ class WindowsEditPipeline:
         vtt_path = ass_path = emphasis_ass_path = None
         transcript_md = transcript_txt = transcript_csv = None
         edit_diff_json = edit_diff_md = None
+        cut_review_json = rejected_xml_path = audio_loudness_json = None
         if extra_exports:
             vtt_path = layout.output_path(self.context, f"{layout.stem}_cut.vtt")
             ass_path = layout.output_path(self.context, f"{layout.stem}_cut.ass")
@@ -360,6 +380,7 @@ class WindowsEditPipeline:
             )
 
         clean_wav_path = None
+        loudness_before = loudness_after = None
         if clean_wav_enabled:
             clean_wav_path = layout.output_path(self.context, f"{layout.stem}_cut_audio.wav")
             make_clean_wav(
@@ -373,6 +394,19 @@ class WindowsEditPipeline:
                 breath_ranges=breath_ranges,
                 limit_seconds=timeline_duration if limit_seconds is not None else None,
             )
+            loudness_before = measure_loudness(ffmpeg, media_path)
+            loudness_after = measure_loudness(ffmpeg, clean_wav_path)
+            audio_loudness_json = layout.output_path(self.context, f"{layout.stem}_audio_loudness.json")
+            write_json(
+                audio_loudness_json,
+                {
+                    "source_media": str(media_path),
+                    "clean_wav": str(clean_wav_path),
+                    "before": loudness_before,
+                    "after": loudness_after,
+                    "audio_preset": audio_preset,
+                },
+            )
 
         xml_path = layout.output_path(self.context, f"{layout.stem}_cut.xml")
         media_for_xml = replace(media, duration=timeline_duration) if limit_seconds is not None else media
@@ -381,6 +415,17 @@ class WindowsEditPipeline:
             encoding="utf-8",
             newline="\n",
         )
+        review_summary = summarize_cut_review(candidates, deletions, mapper.keeps, timeline_duration)
+        if extra_exports:
+            cut_review_json = layout.output_path(self.context, f"{layout.stem}_cut_review.json")
+            write_json(cut_review_json, review_summary)
+            if deletions:
+                rejected_xml_path = layout.output_path(self.context, f"{layout.stem}_rejected.xml")
+                rejected_xml_path.write_text(
+                    build_fcp7_xml(media_for_xml, deletions, f"{layout.stem} [Rejected cuts review]", None),
+                    encoding="utf-8",
+                    newline="\n",
+                )
         report_path = layout.output_path(self.context, f"{layout.stem}_report.html")
         write_report(
             report_path,
@@ -399,6 +444,10 @@ class WindowsEditPipeline:
                 "audio_preset": audio_preset,
                 "noise_floor_db": None if noise is None else round(noise.noise_floor_db, 2),
                 "breath_ranges": len(breath_ranges),
+                "rejected_ranges": review_summary["rejected_ranges"],
+                "choppy_sections": review_summary["choppy_sections"],
+                "loudness_before": loudness_before,
+                "loudness_after": loudness_after,
             },
         )
         keep_ranges_path = layout.output_path(self.context, f"{layout.stem}_keep_ranges.json")
@@ -428,6 +477,9 @@ class WindowsEditPipeline:
             transcript_csv=transcript_csv,
             edit_diff_json=edit_diff_json,
             edit_diff_md=edit_diff_md,
+            cut_review_json=cut_review_json,
+            rejected_xml=rejected_xml_path,
+            audio_loudness_json=audio_loudness_json,
         )
 
     def run(self, options: PipelineOptions) -> PipelineArtifacts:
@@ -444,6 +496,7 @@ class WindowsEditPipeline:
             "dir": "/".join(layout.dir_parts) if layout.dir_parts else None,
             "name": layout.stem,
             "overwrite": options.overwrite,
+            "reuse_transcript_cache": options.reuse_transcript_cache,
             "stt_limit_seconds": options.stt_limit_seconds,
             "transcription_limit_seconds": transcription_limit(options),
         }
@@ -598,6 +651,40 @@ def transcription_limit(options: PipelineOptions) -> float | None:
     if limit is not None and limit <= 0:
         raise RuntimeErrorWithHint("--stt-limit-seconds must be greater than 0.")
     return limit
+
+
+def transcript_cache_metadata(options: PipelineOptions, transcribe_limit: float | None) -> dict:
+    stat = options.input_path.stat()
+    return {
+        "input_path": str(options.input_path.resolve()),
+        "input_size": stat.st_size,
+        "input_mtime_ns": stat.st_mtime_ns,
+        "model": options.model,
+        "language": options.language,
+        "stt_chunk_seconds": options.stt_chunk_seconds,
+        "transcription_limit_seconds": transcribe_limit,
+    }
+
+
+def load_transcript_cache(
+    path: Path,
+    options: PipelineOptions,
+    transcribe_limit: float | None,
+) -> TranscriptResult | None:
+    if not path.exists():
+        return None
+    data = read_json(path)
+    if not isinstance(data, dict):
+        return None
+    if data.get("metadata") != transcript_cache_metadata(options, transcribe_limit):
+        return None
+    try:
+        return transcript_result_from_dict(data)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeErrorWithHint(
+            f"Transcript cache is invalid: {path}\n"
+            "Delete that transcript JSON or rerun with --no-transcript-cache."
+        ) from exc
 
 
 def limit_words(words: list[TranscriptWord], duration: float) -> list[TranscriptWord]:
