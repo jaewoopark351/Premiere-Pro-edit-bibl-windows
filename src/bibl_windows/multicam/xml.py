@@ -4,7 +4,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from ..media_probe import MediaInfo
-from ..paths import windows_file_uri
+from ..paths import premiere_fcp7_pathurl
 from ..timeline.models import TimeRange
 
 
@@ -70,7 +70,7 @@ def build_multicam_xml(
 def file_definition(fid: str, media: MediaInfo, rate: str) -> str:
     total_frames = int(round(media.duration * media.video.fps))
     return f"""
-            <file id="{fid}"><name>{escape(media.path.name)}</name><pathurl>{escape(windows_file_uri(media.path))}</pathurl>{rate}<duration>{total_frames}</duration>
+            <file id="{fid}"><name>{escape(media.path.name)}</name><pathurl>{escape(premiere_fcp7_pathurl(media.path))}</pathurl>{rate}<duration>{total_frames}</duration>
               <media>
                 <video><samplecharacteristics>{rate}<width>{media.video.width}</width><height>{media.video.height}</height><pixelaspectratio>square</pixelaspectratio></samplecharacteristics></video>
                 <audio><samplecharacteristics><depth>16</depth><samplerate>{media.audio.sample_rate}</samplerate></samplecharacteristics><channelcount>{media.audio.channels}</channelcount></audio>
@@ -89,7 +89,7 @@ def build_audio_track(master: MediaInfo, keeps: list[TimeRange], fps: float, rat
     clips = []
     timeline = 0.0
     audio_name = clean_audio.name if clean_audio else master.path.name
-    audio_uri = windows_file_uri(clean_audio) if clean_audio else windows_file_uri(master.path)
+    audio_uri = premiere_fcp7_pathurl(clean_audio) if clean_audio else premiere_fcp7_pathurl(master.path)
     total_frames = int(round(master.duration * fps))
     file_def = f"""
             <file id="mc-audio"><name>{escape(audio_name)}</name><pathurl>{escape(audio_uri)}</pathurl>{rate}<duration>{total_frames}</duration>

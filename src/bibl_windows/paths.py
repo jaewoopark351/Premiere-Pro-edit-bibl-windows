@@ -82,17 +82,26 @@ def _relax_non_ascii_uri_escaping(uri: str) -> str:
     return _URI_MUST_ESCAPE.sub(lambda m: f"%{ord(m.group(0)):02X}", decoded)
 
 
-def windows_file_uri(path: Path) -> str:
+def standards_compliant_file_uri(path: Path) -> str:
     resolved = path if path.is_absolute() else path.resolve()
     try:
-        return _relax_non_ascii_uri_escaping(resolved.as_uri())
+        return resolved.as_uri()
     except ValueError as exc:
         raise PathSafetyError(
-            "Could not convert media path to a Premiere file URI: "
+            "Could not convert media path to a file URI: "
             + str(resolved)
             + "\nUse an absolute drive path such as C:\\Videos\\clip.mp4. "
             + "For network shares, map the share to a drive letter if Premiere cannot import the UNC URI."
         ) from exc
+
+
+def premiere_fcp7_pathurl(path: Path) -> str:
+    return _relax_non_ascii_uri_escaping(standards_compliant_file_uri(path))
+
+
+def windows_file_uri(path: Path) -> str:
+    """Backward-compatible alias for Premiere FCP7 XML pathurl values."""
+    return premiere_fcp7_pathurl(path)
 
 
 def media_stem(path: Path) -> str:

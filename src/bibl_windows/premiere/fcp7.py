@@ -4,7 +4,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from ..media_probe import MediaInfo
-from ..paths import windows_file_uri
+from ..paths import premiere_fcp7_pathurl
 from ..timeline.models import TimeRange
 
 
@@ -22,10 +22,10 @@ def build_fcp7_xml(media: MediaInfo, keeps: list[TimeRange], sequence_name: str,
     fps = media.video.fps
     rate = _rate_xml(fps)
     total_frames = _frames(media.duration, fps)
-    video_uri = escape(windows_file_uri(media.path))
+    video_uri = escape(premiere_fcp7_pathurl(media.path))
     video_name = escape(media.path.name)
     use_clean_audio = clean_audio is not None
-    audio_uri = escape(windows_file_uri(clean_audio)) if clean_audio else video_uri
+    audio_uri = escape(premiere_fcp7_pathurl(clean_audio)) if clean_audio else video_uri
     audio_name = escape(clean_audio.name) if clean_audio else video_name
 
     video_file = f"""
@@ -109,4 +109,3 @@ def build_fcp7_xml(media: MediaInfo, keeps: list[TimeRange], sequence_name: str,
   </sequence>
 </xmeml>
 """
-

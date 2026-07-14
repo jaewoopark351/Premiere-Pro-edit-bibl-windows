@@ -7,7 +7,7 @@ from xml.sax.saxutils import escape
 
 from ..ffmpeg_tools import media_input_arg, media_output_arg, run_checked
 from ..media_probe import MediaInfo
-from ..paths import windows_file_uri
+from ..paths import premiere_fcp7_pathurl
 from ..subtitles.ass import write_ass
 from ..subtitles.srt import group_words, write_srt
 from ..subtitles.vtt import write_vtt
@@ -72,7 +72,7 @@ def build_vertical_xml(media: MediaInfo, clip_range: TimeRange, sequence_name: s
     src_out = int(round(clip_range.end * fps))
     duration = max(1, src_out - src_in)
     total_frames = int(round(media.duration * fps))
-    pathurl = escape(windows_file_uri(media.path))
+    pathurl = escape(premiere_fcp7_pathurl(media.path))
     name = escape(media.path.name)
     scale = max(SHORT_WIDTH / max(1, media.video.width), SHORT_HEIGHT / max(1, media.video.height)) * 100
     motion = f"""

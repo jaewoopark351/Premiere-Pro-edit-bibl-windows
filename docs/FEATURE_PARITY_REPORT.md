@@ -83,7 +83,7 @@
 | 자막 줄 길이 제한 | `make_subtitles.py` | `subtitles/srt.py` | 예 | 부분 구현 | 단순 max chars/gap 중심 | 중간 | subtitle tests |
 | 자막 빈 구간 보정 | `subtitle_polish.py` | `subtitles/srt.py` | 예 | 부분 구현 | small gap 보정만 지원 | 쉬움 | subtitle tests |
 | FCP7 XML 생성 | `silence_cut.py` | `premiere/fcp7.py`, `pipeline.export` | 예 | 완전 구현 | XML 파싱 테스트 포함 | 중간 | FCP7 XML tests |
-| Premiere media path URI | `silence_cut.py` | `paths.windows_file_uri`, `premiere/fcp7.py` | 예 | 완전 구현 | `Path.as_uri()` 기반. UNC는 URI 생성, Premiere import는 환경별 수동 확인 | 중간 | URI/FCP7 tests |
+| Premiere media path URI | `silence_cut.py` | `paths.standards_compliant_file_uri`, `paths.premiere_fcp7_pathurl`, `premiere/fcp7.py` | 예 | 완전 구현 | 표준 URI와 Premiere FCP7 pathurl 역할을 분리. Premiere pathurl은 한글/CJK 자동 연결을 위해 non-ASCII escaping을 완화 | 중간 | URI/FCP7 tests |
 | keep range 생성 | `silence_cut.py` | `timeline/mapper.py`, `pipeline.export` | 예 | 완전 구현 | deletion -> keep mapping | 쉬움 | mapper tests |
 | 버린 컷 검토 데이터 | `auto_cut.complement()` | `cut_candidates.json`, `keep_ranges.json`, `cut_review.json`, `rejected.xml`, report | 예 | 완전 구현 | 삭제 구간 JSON과 버린 컷만 이어 붙인 FCP7 XML을 제공 | 중간 | JSON/report/XML parse tests |
 | HTML 리포트 | `html_report.py` | `reports/html.py` | 예 | 부분 구현 | 원본 리포트보다 간결하지만 삭제 구간과 촘촘한 컷 구간을 표시 | 쉬움 | report tests |
@@ -106,7 +106,7 @@
 - STT 전용 제한은 `--stt-limit-seconds`와 기존 호환 alias `--transcribe-seconds`로 분리했다.
 - `--smoke-seconds`를 전체 파이프라인 스모크 제한 alias로 추가했다.
 - clean WAV, silence analysis, candidate analysis, XML, SRT/VTT/ASS, report, keep range가 같은 제한 시간을 사용하게 했다.
-- FCP7 XML media URI를 수동 조립에서 `Path.as_uri()` 기반으로 바꿨다.
+- FCP7 XML media URI를 수동 조립에서 표준 `Path.as_uri()` 기반으로 바꾸고, Premiere 전용 pathurl 완화 함수를 분리했다.
 - 같은 stem의 기존 manifest가 다른 입력 파일을 가리키면 output name에 짧은 hash를 붙여 덮어쓰기를 피한다.
 - `--output-dir`, `--output-name`, `--overwrite`를 추가했다.
 - 일반 CLI 오류는 traceback 없이 간단히 출력하고, `--debug`에서만 traceback을 표시한다.
@@ -115,6 +115,8 @@
 - `premiere-script`와 `premiere-launch`로 Premiere XML/SRT import 및 선택적 MP4 export JSX를 생성하고 Premiere 실행 진입점을 제공한다.
 - transcript cache를 추가했다. 입력 파일, 크기/mtime, 모델, 언어, chunk, STT 제한 시간이 모두 같을 때만 재사용하며 `--no-transcript-cache`로 강제 재실행할 수 있다.
 - STT에 한국어 verbatim prompt와 previous-text conditioning을 전달하고, timestamp가 없는 단어를 0초로 넣지 않도록 수정했다.
+- Whisper `max_new_tokens=256` 상한은 유지하되, 토큰 상한/비정상 early end 의심 시 해당 WAV 구간만 작은 chunk로 재시도하고 manifest 진단에 기록한다.
+- `doctor --strict`를 추가하고 `install.ps1`의 마지막 설치 검사를 strict 모드로 바꿨다.
 - 반복 구절 감지와 prefix false-start 감지를 추가했다.
 - aggressive 프리셋에서 filler, hesitation, acoustic filler, false-start가 실제 자동 삭제 후보가 되도록 원본 정책을 복원했다.
 - 기본 오디오 처리를 `clean_wav=True`, `audio_preset=natural`로 바꿔 원본 기본 동작과 맞췄다.

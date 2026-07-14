@@ -22,7 +22,7 @@ def test_fcp7_contains_windows_uri_and_links():
 
 def test_fcp7_xml_parses_and_escapes_media_uri_special_characters():
     media = MediaInfo(
-        path=Path(r"D:\테스트 영상\편집 원본 #1 & 50%.mp4"),
+        path=Path(r"D:\테스트 영상\편집 원본 #1 & 50% what? 😀.mp4"),
         duration=5,
         video=VideoStream(index=0, codec_name="h264", width=1280, height=720, fps=30, fps_text="30/1"),
         audio=AudioStream(index=1, codec_name="aac", sample_rate=48000, channels=2),
@@ -34,6 +34,11 @@ def test_fcp7_xml_parses_and_escapes_media_uri_special_characters():
     assert "%23" in pathurl.text
     assert "&" in pathurl.text
     assert "%25" in pathurl.text
+    assert "%3F" in pathurl.text
+    assert "😀" in pathurl.text
+    roundtrip = ET.tostring(root, encoding="unicode")
+    reparsed = ET.fromstring(roundtrip)
+    assert reparsed.find(".//pathurl").text == pathurl.text
 
 
 def test_fcp7_uses_clean_wav_audio_link():
