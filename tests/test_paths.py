@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from bibl_windows.paths import windows_file_uri
+from bibl_windows.paths import media_stem, windows_file_uri
 
 
 def test_windows_file_uri_encodes_spaces_and_korean():
@@ -9,3 +9,19 @@ def test_windows_file_uri_encodes_spaces_and_korean():
     assert "%20" in uri
     assert "%ED%95%9C%EA%B8%80" in uri
 
+
+def test_windows_file_uri_encodes_drive_path_special_characters():
+    uri = windows_file_uri(Path(r"D:\테스트 영상\편집 원본 #1 & 50%.mp4"))
+    assert uri.startswith("file:///D:/")
+    assert "%23" in uri
+    assert "%26" in uri
+    assert "%25" in uri
+
+
+def test_windows_file_uri_supports_unc_path():
+    uri = windows_file_uri(Path(r"\\NAS01\VideoShare\test.mp4"))
+    assert uri == "file://NAS01/VideoShare/test.mp4"
+
+
+def test_media_stem_removes_windows_invalid_name_characters():
+    assert media_stem(Path("bad:name?.mp4")) == "bad_name_"

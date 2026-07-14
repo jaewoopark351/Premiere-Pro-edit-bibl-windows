@@ -7,15 +7,18 @@ import sys
 from pathlib import Path
 
 from .cuda_probe import collect_cuda_diagnostics
-from .ffmpeg_tools import tool_info
+from .ffmpeg_tools import ToolError, tool_info
 from .io_json import read_json, write_json
 from .media_probe import probe_media
+from .paths import PathSafetyError
 from .pipeline import PipelineOptions, WindowsEditPipeline, load_transcript_words
 from .runtime import RuntimeContext, RuntimeErrorWithHint
 from .shorts.generator import ShortArtifact, build_vertical_xml, parse_range, render_vertical_mp4, write_short_subtitles
 from .timeline.models import TimeRange
 from .multicam.sync import best_lag_seconds, extract_envelope
+from .multicam.switching import build_auto_switched_multicam_xml, plan_camera_switches
 from .multicam.xml import build_multicam_xml
+from .premiere.automation import find_premiere_executable, launch_premiere, write_import_render_script
 from .video.analyze import analyze_video
 
 
@@ -140,6 +143,7 @@ def cmd_analyze_cuts(args: argparse.Namespace) -> int:
         Path(args.input),
         args.preset,
         Path(args.transcript) if args.transcript else None,
+        limit_seconds=args.limit_seconds,
     )
     print(f"cut_candidates_json={candidates_json}")
     return 0
@@ -156,6 +160,10 @@ def cmd_export(args: argparse.Namespace) -> int:
         audio_preset=args.audio_preset,
         stt_audio_path=Path(args.stt_audio) if args.stt_audio else None,
         extra_exports=not args.no_extra_exports,
+        limit_seconds=args.limit_seconds,
+        output_dir=args.output_dir,
+        output_name=args.output_name,
+        overwrite=args.overwrite,
     )
     print_artifacts(artifacts)
     return 0
@@ -171,11 +179,15 @@ def cmd_run(args: argparse.Namespace) -> int:
         stt_batch_size=args.stt_batch_size,
         stt_chunk_seconds=args.stt_chunk_seconds,
         limit_seconds=args.limit_seconds,
+        stt_limit_seconds=args.stt_limit_seconds,
         allow_cpu_fallback=args.allow_cpu_fallback,
         clean_wav=args.clean_wav,
         audio_preset=args.audio_preset,
         extra_exports=not args.no_extra_exports,
         advanced_audio_analysis=not args.no_advanced_audio_analysis,
+        output_dir=args.output_dir,
+        output_name=args.output_name,
+        overwrite=args.overwrite,
         command=sys.argv,
     )
     if args.dry_run:
@@ -220,6 +232,11 @@ def cmd_shorts(args: argparse.Namespace) -> int:
     media_path = Path(args.input)
     media = probe_media(ffprobe, media_path)
     ranges = [parse_range(text) for text in args.ranges]
+    for clip_range in ranges:
+        if clip_range.end > media.duration:
+            raise RuntimeErrorWithHint(
+                f"Shorts range {clip_range.start:.3f}-{clip_range.end:.3f}s exceeds media duration {media.duration:.3f}s."
+            )
     words = load_transcript_words(Path(args.transcript)) if args.transcript else []
     outdir = context.paths.output_path("shorts", ".placeholder").parent
     outdir.mkdir(parents=True, exist_ok=True)
@@ -274,6 +291,93 @@ def cmd_multicam_xml(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auto_multicam_xml(args: argparse.Namespace) -> int:
+    context = RuntimeContext.discover()
+    _ffmpeg, ffprobe = context.tools.require_media_tools()
+    master_path = Path(args.master)
+    master = probe_media(ffprobe, master_path)
+    cameras = [(probe_media(ffprobe, Path(path)), float(offset)) for path, offset in parse_camera_args(args.camera)]
+    keeps = load_keep_ranges(Path(args.keep_ranges)) if args.keep_ranges else default_keep_ranges(context, master_path, master.duration)
+    clean_audio = Path(args.clean_audio) if args.clean_audio else None
+    switches = plan_camera_switches(
+        master,
+        cameras,
+        keeps,
+        switch_interval=args.switch_interval,
+        min_segment=args.min_segment,
+    )
+    output = output_path_arg(context, args.output, f"{master_path.stem}_auto_multicam.xml")
+    output.write_text(
+        build_auto_switched_multicam_xml(
+            master,
+            cameras,
+            switches,
+            f"{master_path.stem} auto multicam",
+            clean_audio=clean_audio,
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    plan_path = output.with_suffix(".switches.json")
+    write_json(
+        plan_path,
+        {
+            "master": str(master_path),
+            "cameras": [{"path": path, "offset": float(offset)} for path, offset in parse_camera_args(args.camera)],
+            "switch_interval": args.switch_interval,
+            "min_segment": args.min_segment,
+            "switches": [item.to_dict() for item in switches],
+        },
+    )
+    print(f"auto_multicam_xml={output}")
+    print(f"switch_plan_json={plan_path}")
+    return 0
+
+
+def cmd_premiere_script(args: argparse.Namespace) -> int:
+    context = RuntimeContext.discover()
+    xml_path = Path(args.xml)
+    if not xml_path.exists():
+        raise RuntimeErrorWithHint(f"Premiere XML file was not found: {xml_path}")
+    srt_path = Path(args.srt) if args.srt else None
+    if srt_path is not None and not srt_path.exists():
+        raise RuntimeErrorWithHint(f"Subtitle file was not found: {srt_path}")
+    encoder_preset = Path(args.encoder_preset) if args.encoder_preset else None
+    if encoder_preset is not None and not encoder_preset.exists():
+        raise RuntimeErrorWithHint(f"Adobe encoder preset was not found: {encoder_preset}")
+    export_mp4 = output_path_arg(context, args.export_mp4, Path(args.xml).stem + "_premiere_export.mp4") if args.export_mp4 else None
+    output = output_path_arg(context, args.output, Path(args.xml).stem + "_premiere_import.jsx")
+    write_import_render_script(
+        output,
+        xml_path,
+        srt_path=srt_path,
+        export_path=export_mp4,
+        encoder_preset=encoder_preset,
+    )
+    print(f"premiere_script={output}")
+    if export_mp4:
+        print(f"planned_export_mp4={export_mp4}")
+    return 0
+
+
+def cmd_premiere_launch(args: argparse.Namespace) -> int:
+    premiere_exe = find_premiere_executable(Path(args.premiere_exe) if args.premiere_exe else None)
+    if premiere_exe is None:
+        raise RuntimeErrorWithHint(
+            "Adobe Premiere Pro executable was not found. Pass --premiere-exe with the full path to Adobe Premiere Pro.exe."
+        )
+    xml_path = Path(args.xml) if args.xml else None
+    script_path = Path(args.script) if args.script else None
+    if xml_path is not None and not xml_path.exists():
+        raise RuntimeErrorWithHint(f"Premiere XML file was not found: {xml_path}")
+    if script_path is not None and not script_path.exists():
+        raise RuntimeErrorWithHint(f"Premiere script file was not found: {script_path}")
+    process = launch_premiere(premiere_exe, xml_path=xml_path, script_path=script_path)
+    print(f"premiere_pid={process.pid}")
+    print(f"premiere_exe={premiere_exe}")
+    return 0
+
+
 def parse_camera_args(values: list[list[str]] | None) -> list[tuple[str, str]]:
     return [(item[0], item[1]) for item in (values or [])]
 
@@ -301,21 +405,27 @@ def output_path_arg(context: RuntimeContext, value: str | None, default_name: st
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bibl-windows")
+    parser.add_argument("--debug", action="store_true", help="show full Python traceback on errors")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    doctor = sub.add_parser("doctor")
+    doctor.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    doctor.set_defaults(func=cmd_doctor)
 
     claude = sub.add_parser("claude")
+    claude.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     claude.add_argument("--verbose", "--full", action="store_true", help="include full agent and skill descriptions")
     claude.add_argument("--output", help="write JSON to a UTF-8 file instead of printing it")
     claude.add_argument("--ascii-output", action="store_true", help="escape non-ASCII characters in --output JSON")
     claude.set_defaults(func=cmd_claude)
 
     probe = sub.add_parser("probe")
+    probe.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     probe.add_argument("input")
     probe.set_defaults(func=cmd_probe)
 
     transcribe = sub.add_parser("transcribe")
+    transcribe.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     transcribe.add_argument("input")
     transcribe.add_argument("--preset", default="standard", choices=PRESETS)
     transcribe.add_argument("--limit-seconds", "--seconds", type=float, default=None, dest="limit_seconds")
@@ -327,12 +437,15 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.set_defaults(func=cmd_transcribe)
 
     analyze = sub.add_parser("analyze-cuts")
+    analyze.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     analyze.add_argument("input")
     analyze.add_argument("--preset", default="standard", choices=PRESETS)
     analyze.add_argument("--transcript")
+    analyze.add_argument("--limit-seconds", type=float, default=None)
     analyze.set_defaults(func=cmd_analyze_cuts)
 
     export = sub.add_parser("export")
+    export.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     export.add_argument("input")
     export.add_argument("--preset", default="standard", choices=PRESETS)
     export.add_argument("--transcript")
@@ -341,12 +454,32 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--audio-preset", default="standard", choices=AUDIO_PRESETS)
     export.add_argument("--stt-audio")
     export.add_argument("--no-extra-exports", action="store_true")
+    export.add_argument("--limit-seconds", type=float, default=None)
+    export.add_argument("--output-dir")
+    export.add_argument("--output-name")
+    export.add_argument("--overwrite", action="store_true")
     export.set_defaults(func=cmd_export)
 
     run = sub.add_parser("run")
+    run.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     run.add_argument("input")
     run.add_argument("--preset", default="standard", choices=PRESETS)
-    run.add_argument("--limit-seconds", "--transcribe-seconds", type=float, default=None, dest="limit_seconds")
+    run.add_argument(
+        "--limit-seconds",
+        "--smoke-seconds",
+        type=float,
+        default=None,
+        dest="limit_seconds",
+        help="limit the whole pipeline to the first N seconds",
+    )
+    run.add_argument(
+        "--stt-limit-seconds",
+        "--transcribe-seconds",
+        type=float,
+        default=None,
+        dest="stt_limit_seconds",
+        help="limit only the audio passed to Whisper",
+    )
     run.add_argument("--model", default="openai/whisper-large-v3")
     run.add_argument("--language", default="ko")
     run.add_argument("--stt-batch-size", type=int, default=1)
@@ -356,20 +489,26 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--audio-preset", default="standard", choices=AUDIO_PRESETS)
     run.add_argument("--no-extra-exports", action="store_true")
     run.add_argument("--no-advanced-audio-analysis", action="store_true")
+    run.add_argument("--output-dir", help="relative subdirectory under output")
+    run.add_argument("--output-name", help="base name for generated artifacts")
+    run.add_argument("--overwrite", action="store_true", help="reuse the requested output base even if a manifest exists")
     run.add_argument("--dry-run", action="store_true", help="validate inputs and show the planned outputs without STT or export")
     run.set_defaults(func=cmd_run)
 
     analyze_video_parser = sub.add_parser("analyze-video")
+    analyze_video_parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     analyze_video_parser.add_argument("input")
     analyze_video_parser.add_argument("--output")
     analyze_video_parser.add_argument("--print", action="store_true")
     analyze_video_parser.set_defaults(func=cmd_analyze_video)
 
     recommend = sub.add_parser("recommend-preset")
+    recommend.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     recommend.add_argument("input")
     recommend.set_defaults(func=cmd_recommend_preset)
 
     shorts = sub.add_parser("shorts")
+    shorts.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     shorts.add_argument("input")
     shorts.add_argument("ranges", nargs="+", help='time ranges such as "00:12-00:28"')
     shorts.add_argument("--transcript")
@@ -377,6 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     shorts.set_defaults(func=cmd_shorts)
 
     sync = sub.add_parser("sync-2cam")
+    sync.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     sync.add_argument("first")
     sync.add_argument("second")
     sync.add_argument("--max-lag-seconds", type=float, default=300.0)
@@ -384,6 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync.set_defaults(func=cmd_sync_2cam)
 
     multicam = sub.add_parser("multicam-xml")
+    multicam.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     multicam.add_argument("master")
     multicam.add_argument("--camera", nargs=2, action="append", default=[], metavar=("PATH", "OFFSET_SECONDS"))
     multicam.add_argument("--keep-ranges")
@@ -391,7 +532,35 @@ def build_parser() -> argparse.ArgumentParser:
     multicam.add_argument("--output")
     multicam.set_defaults(func=cmd_multicam_xml)
 
+    auto_multicam = sub.add_parser("auto-multicam-xml")
+    auto_multicam.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    auto_multicam.add_argument("master")
+    auto_multicam.add_argument("--camera", nargs=2, action="append", default=[], metavar=("PATH", "OFFSET_SECONDS"))
+    auto_multicam.add_argument("--keep-ranges")
+    auto_multicam.add_argument("--clean-audio")
+    auto_multicam.add_argument("--switch-interval", type=float, default=6.0)
+    auto_multicam.add_argument("--min-segment", type=float, default=1.0)
+    auto_multicam.add_argument("--output")
+    auto_multicam.set_defaults(func=cmd_auto_multicam_xml)
+
+    premiere_script = sub.add_parser("premiere-script")
+    premiere_script.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    premiere_script.add_argument("xml")
+    premiere_script.add_argument("--srt")
+    premiere_script.add_argument("--output")
+    premiere_script.add_argument("--export-mp4")
+    premiere_script.add_argument("--encoder-preset")
+    premiere_script.set_defaults(func=cmd_premiere_script)
+
+    premiere_launch = sub.add_parser("premiere-launch")
+    premiere_launch.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    premiere_launch.add_argument("--premiere-exe")
+    premiere_launch.add_argument("--xml")
+    premiere_launch.add_argument("--script")
+    premiere_launch.set_defaults(func=cmd_premiere_launch)
+
     note = sub.add_parser("note")
+    note.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     note.add_argument("note")
     note.set_defaults(func=cmd_init_report)
 
@@ -403,9 +572,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except RuntimeErrorWithHint as exc:
-        print(str(exc), file=sys.stderr)
+    except (RuntimeErrorWithHint, ToolError, PathSafetyError, ValueError, json.JSONDecodeError) as exc:
+        if getattr(args, "debug", False):
+            raise
+        print(format_user_error(exc), file=sys.stderr)
         return 2
+    except Exception as exc:
+        if getattr(args, "debug", False):
+            raise
+        print(format_user_error(exc), file=sys.stderr)
+        return 2
+
+
+def format_user_error(exc: Exception) -> str:
+    if isinstance(exc, json.JSONDecodeError):
+        return "Error: JSON file could not be parsed. Check that the transcript, candidates, or keep-ranges file is not corrupted."
+    text = str(exc).strip()
+    if isinstance(exc, ToolError):
+        first = next((line for line in text.splitlines() if line.strip()), "FFmpeg command failed.")
+        return "Error: " + first + "\nRun `python -m bibl_windows.cli doctor` and confirm ffmpeg.exe/ffprobe.exe are on PATH."
+    if isinstance(exc, PathSafetyError):
+        return "Error: " + text
+    if isinstance(exc, RuntimeErrorWithHint):
+        return "Error: " + text
+    if isinstance(exc, ValueError):
+        return "Error: invalid input: " + text
+    return "Error: " + (text or exc.__class__.__name__) + "\nRun again with `--debug` for a full traceback."
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from bibl_windows.timeline.models import CutCandidate
 
 
 def test_html_report_includes_timeline_summary():
-    test_dir = Path.cwd() / ".test_tmp" / f"html_report_{uuid.uuid4().hex}"
+    test_dir = Path.cwd() / ".test_tmp_manual" / f"html_report_{uuid.uuid4().hex}"
     test_dir.mkdir(parents=True)
     out = test_dir / "report.html"
     try:

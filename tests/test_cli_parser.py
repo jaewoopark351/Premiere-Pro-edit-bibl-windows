@@ -8,12 +8,22 @@ def test_run_parser_defaults_to_full_transcription():
 
 def test_run_parser_accepts_legacy_transcribe_seconds_alias():
     args = build_parser().parse_args(["run", "sample.mp4", "--transcribe-seconds", "23.5"])
-    assert args.limit_seconds == 23.5
+    assert args.stt_limit_seconds == 23.5
 
 
 def test_run_parser_accepts_limit_seconds():
     args = build_parser().parse_args(["run", "sample.mp4", "--limit-seconds", "30"])
     assert args.limit_seconds == 30
+
+
+def test_run_parser_accepts_smoke_seconds_as_pipeline_limit():
+    args = build_parser().parse_args(["run", "sample.mp4", "--smoke-seconds", "15"])
+    assert args.limit_seconds == 15
+
+
+def test_run_parser_accepts_stt_limit_seconds():
+    args = build_parser().parse_args(["run", "sample.mp4", "--stt-limit-seconds", "12"])
+    assert args.stt_limit_seconds == 12
 
 
 def test_run_parser_accepts_dry_run():
@@ -47,6 +57,15 @@ def test_run_parser_accepts_phase_2_3_options():
     assert args.no_extra_exports
 
 
+def test_run_parser_accepts_output_controls():
+    args = build_parser().parse_args(
+        ["run", "sample.mp4", "--output-dir", "session 1", "--output-name", "custom", "--overwrite"]
+    )
+    assert args.output_dir == "session 1"
+    assert args.output_name == "custom"
+    assert args.overwrite
+
+
 def test_parser_accepts_shorts_command():
     args = build_parser().parse_args(["shorts", "sample.mp4", "00:01-00:05", "--transcript", "out.json"])
     assert args.command == "shorts"
@@ -57,6 +76,26 @@ def test_parser_accepts_multicam_command():
     args = build_parser().parse_args(["multicam-xml", "master.mp4", "--camera", "cam.mp4", "1.25"])
     assert args.command == "multicam-xml"
     assert args.camera == [["cam.mp4", "1.25"]]
+
+
+def test_parser_accepts_auto_multicam_command():
+    args = build_parser().parse_args(
+        ["auto-multicam-xml", "master.mp4", "--camera", "cam.mp4", "1.25", "--switch-interval", "4"]
+    )
+    assert args.command == "auto-multicam-xml"
+    assert args.switch_interval == 4
+
+
+def test_parser_accepts_premiere_script_command():
+    args = build_parser().parse_args(["premiere-script", "out.xml", "--srt", "out.srt", "--export-mp4", "render.mp4"])
+    assert args.command == "premiere-script"
+    assert args.export_mp4 == "render.mp4"
+
+
+def test_parser_accepts_premiere_launch_command():
+    args = build_parser().parse_args(["premiere-launch", "--xml", "out.xml"])
+    assert args.command == "premiere-launch"
+    assert args.xml == "out.xml"
 
 
 def test_parser_accepts_claude_assets_command():

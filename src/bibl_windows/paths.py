@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
 
 
 class PathSafetyError(ValueError):
@@ -62,14 +63,30 @@ def ensure_inside(path: Path, parent: Path) -> None:
 
 
 def windows_file_uri(path: Path) -> str:
-    resolved = path.resolve()
-    drive = resolved.drive.rstrip(":").upper()
-    if not drive:
-        raise PathSafetyError(f"Windows file URI requires an absolute drive path: {resolved}")
-    parts = [quote(part) for part in resolved.parts[1:]]
-    return f"file:///{drive}:/" + "/".join(parts)
+    resolved = path if path.is_absolute() else path.resolve()
+    try:
+        return resolved.as_uri()
+    except ValueError as exc:
+        raise PathSafetyError(
+            "Could not convert media path to a Premiere file URI: "
+            + str(resolved)
+            + "\nUse an absolute drive path such as C:\\Videos\\clip.mp4. "
+            + "For network shares, map the share to a drive letter if Premiere cannot import the UNC URI."
+        ) from exc
 
 
 def media_stem(path: Path) -> str:
-    stem = path.stem.strip()
-    return stem or "media"
+    return safe_output_component(path.stem)
+
+
+_INVALID_WINDOWS_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_output_component(value: str) -> str:
+    cleaned = _INVALID_WINDOWS_NAME_CHARS.sub("_", value.strip()).rstrip(". ")
+    return cleaned or "media"
+
+
+def short_path_hash(path: Path, length: int = 8) -> str:
+    resolved = str(path.resolve()).casefold()
+    return hashlib.sha1(resolved.encode("utf-8", errors="surrogatepass")).hexdigest()[:length]

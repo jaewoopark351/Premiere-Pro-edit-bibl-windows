@@ -69,8 +69,10 @@ class TransformersWhisperBackend:
                 raise SttRuntimeError(
                     "CUDA ran out of memory during Whisper transcription. "
                     "Close other GPU apps, keep `--stt-batch-size 1`, lower "
-                    "`--stt-chunk-seconds`, or use "
-                    "`--model openai/whisper-large-v3-turbo` for a smaller/faster model. "
+                    "`--stt-chunk-seconds`, or select the intended GPU with "
+                    "`CUDA_VISIBLE_DEVICES`. This port intentionally keeps "
+                    "`openai/whisper-large-v3` as the default model and does "
+                    "not automatically downgrade it. "
                     f"Original error: {message}"
                 ) from exc
             raise SttRuntimeError(f"Whisper transcription failed: {message}") from exc

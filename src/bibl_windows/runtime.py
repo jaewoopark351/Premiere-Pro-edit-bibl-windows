@@ -24,9 +24,15 @@ class RuntimeTools:
 
     def require_media_tools(self) -> tuple[Path, Path]:
         if not self.ffmpeg.path:
-            raise RuntimeErrorWithHint("ffmpeg.exe was not found on PATH.")
+            raise RuntimeErrorWithHint(
+                "ffmpeg.exe was not found on PATH.\n"
+                "Install FFmpeg for Windows, add its bin directory to PATH, then reopen PowerShell."
+            )
         if not self.ffprobe.path:
-            raise RuntimeErrorWithHint("ffprobe.exe was not found on PATH.")
+            raise RuntimeErrorWithHint(
+                "ffprobe.exe was not found on PATH.\n"
+                "Install FFmpeg for Windows, add its bin directory to PATH, then reopen PowerShell."
+            )
         return self.ffmpeg.path, self.ffprobe.path
 
 

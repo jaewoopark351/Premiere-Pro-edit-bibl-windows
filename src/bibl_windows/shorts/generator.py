@@ -56,6 +56,8 @@ def parse_range(text: str) -> TimeRange:
         raise ValueError(f"invalid short range, expected START-END: {text}")
     start = parse_timecode(match.group(1))
     end = parse_timecode(match.group(2))
+    if start < 0:
+        raise ValueError(f"short range start must be zero or later: {text}")
     if end <= start:
         raise ValueError(f"short range end must be after start: {text}")
     return TimeRange(start, end)

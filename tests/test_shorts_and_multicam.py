@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from bibl_windows.media_probe import AudioStream, MediaInfo, VideoStream
+from bibl_windows.multicam.switching import build_auto_switched_multicam_xml, plan_camera_switches
 from bibl_windows.multicam.xml import build_multicam_xml
 from bibl_windows.shorts.generator import build_vertical_xml, parse_range
 from bibl_windows.timeline.models import TimeRange
@@ -21,6 +24,11 @@ def test_short_range_parser():
     assert item.end == 3.5
 
 
+def test_short_range_rejects_negative_start():
+    with pytest.raises(ValueError):
+        parse_range("-1-00:03")
+
+
 def test_vertical_xml_uses_9x16_sequence():
     xml = build_vertical_xml(sample_media(), TimeRange(1, 3), "short")
     assert "<width>1080</width><height>1920</height>" in xml
@@ -32,4 +40,14 @@ def test_multicam_xml_contains_multiple_tracks():
     cam = sample_media(r"C:\video sample\cam2.mp4")
     xml = build_multicam_xml(master, [(cam, 0.5)], [TimeRange(1, 3)], "mc")
     assert xml.count("<track>") >= 3
+    assert "cam2.mp4" in xml
+
+
+def test_auto_multicam_switches_between_sources():
+    master = sample_media()
+    cam = sample_media(r"C:\video sample\cam2.mp4")
+    switches = plan_camera_switches(master, [(cam, 0.0)], [TimeRange(0, 6)], switch_interval=2, min_segment=1)
+    xml = build_auto_switched_multicam_xml(master, [(cam, 0.0)], switches, "auto")
+    assert [item.source_index for item in switches] == [0, 1, 0]
+    assert "auto-mc-v1" in xml
     assert "cam2.mp4" in xml

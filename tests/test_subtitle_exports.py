@@ -9,7 +9,7 @@ from bibl_windows.timeline.models import TranscriptWord
 
 
 def test_vtt_writer_outputs_webvtt():
-    test_dir = Path.cwd() / ".test_tmp" / f"subtitle_exports_{uuid.uuid4().hex}"
+    test_dir = Path.cwd() / ".test_tmp_manual" / f"subtitle_exports_{uuid.uuid4().hex}"
     test_dir.mkdir(parents=True)
     path = test_dir / "sample.vtt"
     try:

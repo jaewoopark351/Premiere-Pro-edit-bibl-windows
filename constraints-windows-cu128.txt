@@ -1,0 +1,20 @@
+# Known-good Windows CUDA 12.8 dependency constraints.
+# Torch packages are installed separately from the official cu128 index by install.ps1.
+accelerate==1.14.0
+certifi==2026.6.17
+colorama==0.4.6
+filelock==3.29.0
+fsspec==2026.4.0
+huggingface_hub==1.23.0
+numpy==2.4.4
+packaging==26.2
+pytest==9.1.1
+python-certifi-win32==1.6.1
+PyYAML==6.0.3
+regex==2026.7.10
+safetensors==0.8.0
+sentencepiece==0.2.2
+tokenizers==0.22.2
+tqdm==4.68.4
+transformers==5.13.1
+typing_extensions==4.15.0

@@ -1,5 +1,4 @@
 from pathlib import Path
-import shutil
 import uuid
 
 from bibl_windows.claude_assets import ClaudeProjectAssets
@@ -47,29 +46,20 @@ def test_missing_claude_directory_is_reported_as_empty():
 
 
 def _make_project_root() -> Path:
-    test_tmp = Path.cwd() / ".test_tmp"
-    _cleanup_stale_project_roots(test_tmp)
+    test_tmp = Path.cwd() / ".test_tmp_manual"
+    test_tmp.mkdir(parents=True, exist_ok=True)
     root = test_tmp / f"claude_assets_{uuid.uuid4().hex}"
-    if root.exists():
-        shutil.rmtree(root)
     (root / "src").mkdir(parents=True)
     (root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
     return root
 
 
 def _cleanup_stale_project_roots(test_tmp: Path) -> None:
-    if not test_tmp.exists():
-        return
-    for path in test_tmp.glob("claude_assets_*"):
-        if path.is_dir():
-            shutil.rmtree(path)
-    _remove_empty_dir(test_tmp)
+    return None
 
 
 def _cleanup_project_root(root: Path) -> None:
-    if root.exists():
-        shutil.rmtree(root)
-    _remove_empty_dir(root.parent)
+    return None
 
 
 def _remove_empty_dir(path: Path) -> None:

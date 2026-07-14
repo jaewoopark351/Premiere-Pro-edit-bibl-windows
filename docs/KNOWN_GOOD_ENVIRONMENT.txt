@@ -1,0 +1,36 @@
+Known-good Windows environment
+==============================
+
+Date verified: 2026-07-14
+
+Target
+------
+
+- Windows 11
+- Python 3.12 64-bit
+- NVIDIA CUDA PyTorch cu128
+- NVIDIA RTX 5070 Ti 16GB or better recommended
+- RAM 32GB minimum, 64GB recommended for long recordings
+- FFmpeg and FFprobe available on PATH
+- Default STT model: openai/whisper-large-v3
+
+Observed package set
+--------------------
+
+- torch 2.11.0+cu128
+- torchvision 0.26.0+cu128
+- torchaudio 2.11.0+cu128
+- transformers 5.13.1
+- accelerate 1.14.0
+- numpy 2.4.4
+- safetensors 0.8.0
+- sentencepiece 0.2.2
+- pytest 9.1.1
+
+Policy
+------
+
+This port is not designed as a low-spec fallback. It does not automatically
+downgrade from openai/whisper-large-v3 to turbo or smaller Whisper models.
+Lower GPUs are not blocked at install time, but they may run slowly or fail
+with CUDA out-of-memory errors.

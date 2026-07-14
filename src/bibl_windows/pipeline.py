@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .analysis.cuts import (
@@ -19,7 +19,7 @@ from .exports.edit_diff import summarize_edit_diff, write_edit_diff
 from .exports.transcript import write_transcript_csv, write_transcript_markdown, write_transcript_text
 from .io_json import read_json, write_json
 from .media_probe import MediaInfo, probe_media
-from .paths import media_stem
+from .paths import ensure_inside, media_stem, safe_output_component, short_path_hash
 from .premiere.fcp7 import build_fcp7_xml
 from .reports.html import write_report
 from .runtime import RuntimeContext, RuntimeErrorWithHint
@@ -42,11 +42,15 @@ class PipelineOptions:
     stt_batch_size: int = 1
     stt_chunk_seconds: float = 25.0
     limit_seconds: float | None = None
+    stt_limit_seconds: float | None = None
     allow_cpu_fallback: bool = False
     clean_wav: bool = False
     audio_preset: str = "standard"
     extra_exports: bool = True
     advanced_audio_analysis: bool = True
+    output_dir: str | None = None
+    output_name: str | None = None
+    overwrite: bool = False
     command: list[str] | None = None
 
 
@@ -72,6 +76,18 @@ class PipelineArtifacts:
     manifest_json: Path | None = None
 
 
+@dataclass(frozen=True)
+class OutputLayout:
+    dir_parts: tuple[str, ...]
+    stem: str
+
+    def expected_path(self, output_root: Path, filename: str) -> Path:
+        return (output_root.joinpath(*self.dir_parts, filename)).resolve()
+
+    def output_path(self, context: RuntimeContext, filename: str) -> Path:
+        return context.paths.output_path(*self.dir_parts, filename)
+
+
 class WindowsEditPipeline:
     def __init__(self, context: RuntimeContext | None = None) -> None:
         self.context = context or RuntimeContext.discover()
@@ -84,10 +100,11 @@ class WindowsEditPipeline:
     def transcribe(self, options: PipelineOptions) -> tuple[TranscriptResult, Path, Path]:
         require_input_file(options.input_path)
         ffmpeg, _ffprobe = self.context.tools.require_media_tools()
-        stem = media_stem(options.input_path)
-        suffix = "_stt_audio.wav" if options.limit_seconds is None else f"_stt_{options.limit_seconds:g}s.wav"
-        stt_audio = self.context.paths.output_path(stem + suffix)
-        extract_audio_for_stt(ffmpeg, options.input_path, stt_audio, options.limit_seconds)
+        layout = self.output_layout(options)
+        transcribe_limit = transcription_limit(options)
+        suffix = "_stt_audio.wav" if transcribe_limit is None else f"_stt_{transcribe_limit:g}s.wav"
+        stt_audio = layout.output_path(self.context, layout.stem + suffix)
+        extract_audio_for_stt(ffmpeg, options.input_path, stt_audio, transcribe_limit)
         try:
             result = TransformersWhisperBackend(options.model).transcribe(
                 stt_audio,
@@ -102,42 +119,43 @@ class WindowsEditPipeline:
                 "or rerun with `--allow-cpu-fallback` for a slow CPU check."
             )
             raise RuntimeErrorWithHint(f"STT failed while transcribing {stt_audio}: {exc}{fallback_hint}") from exc
-        transcript_json = self.context.paths.output_path(f"{stem}_transcript.json")
+        transcript_json = layout.output_path(self.context, f"{layout.stem}_transcript.json")
         write_json(transcript_json, result.to_dict())
         return result, transcript_json, stt_audio
 
     def dry_run(self, options: PipelineOptions) -> dict:
         require_input_file(options.input_path)
-        stem = media_stem(options.input_path)
+        layout = self.output_layout(options)
+        transcribe_limit = transcription_limit(options)
         preset = self.context.load_preset(options.preset_name)
         outdir = self.context.paths.output_dir.resolve()
 
         def expected_path(name: str) -> str:
-            return str((outdir / name).resolve())
+            return str(layout.expected_path(outdir, name))
 
         output = {
-            "transcript_json": expected_path(f"{stem}_transcript.json"),
+            "transcript_json": expected_path(f"{layout.stem}_transcript.json"),
             "stt_audio": expected_path(
-                stem + ("_stt_audio.wav" if options.limit_seconds is None else f"_stt_{options.limit_seconds:g}s.wav")
+                layout.stem + ("_stt_audio.wav" if transcribe_limit is None else f"_stt_{transcribe_limit:g}s.wav")
             ),
-            "cut_candidates_json": expected_path(f"{stem}_cut_candidates.json"),
-            "xml": expected_path(f"{stem}_cut.xml"),
-            "srt": expected_path(f"{stem}_cut.srt"),
-            "vtt": expected_path(f"{stem}_cut.vtt"),
-            "ass": expected_path(f"{stem}_cut.ass"),
-            "emphasis_ass": expected_path(f"{stem}_cut_emphasis.ass"),
-            "report": expected_path(f"{stem}_report.html"),
-            "keep_ranges_json": expected_path(f"{stem}_keep_ranges.json"),
-            "breath_ranges_json": expected_path(f"{stem}_breath_ranges.json"),
-            "transcript_md": expected_path(f"{stem}_transcript.md"),
-            "transcript_txt": expected_path(f"{stem}_transcript.txt"),
-            "transcript_csv": expected_path(f"{stem}_transcript.csv"),
-            "edit_diff_json": expected_path(f"{stem}_edit_diff.json"),
-            "edit_diff_md": expected_path(f"{stem}_edit_diff.md"),
-            "manifest_json": expected_path(f"{stem}_manifest.json"),
+            "cut_candidates_json": expected_path(f"{layout.stem}_cut_candidates.json"),
+            "xml": expected_path(f"{layout.stem}_cut.xml"),
+            "srt": expected_path(f"{layout.stem}_cut.srt"),
+            "vtt": expected_path(f"{layout.stem}_cut.vtt"),
+            "ass": expected_path(f"{layout.stem}_cut.ass"),
+            "emphasis_ass": expected_path(f"{layout.stem}_cut_emphasis.ass"),
+            "report": expected_path(f"{layout.stem}_report.html"),
+            "keep_ranges_json": expected_path(f"{layout.stem}_keep_ranges.json"),
+            "breath_ranges_json": expected_path(f"{layout.stem}_breath_ranges.json"),
+            "transcript_md": expected_path(f"{layout.stem}_transcript.md"),
+            "transcript_txt": expected_path(f"{layout.stem}_transcript.txt"),
+            "transcript_csv": expected_path(f"{layout.stem}_transcript.csv"),
+            "edit_diff_json": expected_path(f"{layout.stem}_edit_diff.json"),
+            "edit_diff_md": expected_path(f"{layout.stem}_edit_diff.md"),
+            "manifest_json": expected_path(f"{layout.stem}_manifest.json"),
         }
         if options.clean_wav:
-            output["clean_wav"] = expected_path(f"{stem}_cut_audio.wav")
+            output["clean_wav"] = expected_path(f"{layout.stem}_cut_audio.wav")
 
         media = None
         media_probe_error = None
@@ -157,9 +175,14 @@ class WindowsEditPipeline:
             "stt_batch_size": options.stt_batch_size,
             "stt_chunk_seconds": options.stt_chunk_seconds,
             "limit_seconds": options.limit_seconds,
+            "stt_limit_seconds": options.stt_limit_seconds,
+            "transcription_limit_seconds": transcribe_limit,
             "allow_cpu_fallback": options.allow_cpu_fallback,
             "clean_wav": options.clean_wav,
             "audio_preset": options.audio_preset,
+            "output_dir": "/".join(layout.dir_parts) if layout.dir_parts else None,
+            "output_name": layout.stem,
+            "overwrite": options.overwrite,
             "extra_exports": options.extra_exports,
             "advanced_audio_analysis": options.advanced_audio_analysis,
             "tools": {
@@ -187,22 +210,29 @@ class WindowsEditPipeline:
         transcript_json: Path | None,
         stt_audio_path: Path | None = None,
         advanced_audio_analysis: bool = True,
+        limit_seconds: float | None = None,
+        output_dir: str | None = None,
+        output_name: str | None = None,
+        overwrite: bool = False,
     ) -> tuple[MediaInfo, list[CutCandidate], Path]:
         require_input_file(media_path)
         ffmpeg, ffprobe = self.context.tools.require_media_tools()
+        layout = self.output_layout_for(media_path, output_dir, output_name, overwrite)
         preset = self.context.load_preset(preset_name)
         media = probe_media(ffprobe, media_path)
+        analysis_duration = bounded_duration(media.duration, limit_seconds)
         silences = detect_silence(
             ffmpeg,
             media_path,
             float(preset["silence"]["noise_db"]),
             float(preset["silence"]["min_silence"]),
-            media.duration,
+            analysis_duration,
+            limit_seconds=analysis_duration if limit_seconds is not None else None,
         )
         cut_cfg = preset["cuts"]
         candidates = silence_candidates(
             silences,
-            media.duration,
+            analysis_duration,
             float(cut_cfg["long_silence"]),
             float(cut_cfg["start_wait"]),
             float(cut_cfg["end_silence"]),
@@ -211,7 +241,7 @@ class WindowsEditPipeline:
         )
         audio_analysis: dict = {}
         if transcript_json and transcript_json.exists():
-            words = load_transcript_words(transcript_json)
+            words = limit_words(load_transcript_words(transcript_json), analysis_duration)
             candidates += repeated_speech_candidates(words, float(cut_cfg["repeat_gap"]), float(cut_cfg["word_pad"]))
             candidates += false_start_candidates(
                 words,
@@ -226,8 +256,8 @@ class WindowsEditPipeline:
             )
             if advanced_audio_analysis and stt_audio_path and stt_audio_path.exists():
                 noise = measure_noise_floor(stt_audio_path)
-                breath_ranges = detect_breath_ranges(stt_audio_path, words, noise, media.duration)
-                candidates += acoustic_filler_candidates(stt_audio_path, words, noise, media.duration)
+                breath_ranges = detect_breath_ranges(stt_audio_path, words, noise, analysis_duration)
+                candidates += acoustic_filler_candidates(stt_audio_path, words, noise, analysis_duration)
                 candidates += [
                     CutCandidate(
                         start=item.start,
@@ -245,12 +275,14 @@ class WindowsEditPipeline:
                     "breath_ranges": [item.__dict__ for item in breath_ranges],
                 }
         candidates = dedupe_candidates(candidates)
-        out = self.context.paths.output_path(f"{media_stem(media_path)}_cut_candidates.json")
+        out = layout.output_path(self.context, f"{layout.stem}_cut_candidates.json")
         write_json(
             out,
             {
                 "media": media.to_dict(),
                 "preset": preset_name,
+                "limit_seconds": limit_seconds,
+                "analysis_duration": analysis_duration,
                 "audio_analysis": audio_analysis,
                 "candidates": [c.to_dict() for c in candidates],
             },
@@ -267,41 +299,46 @@ class WindowsEditPipeline:
         audio_preset: str = "standard",
         stt_audio_path: Path | None = None,
         extra_exports: bool = True,
+        limit_seconds: float | None = None,
+        output_dir: str | None = None,
+        output_name: str | None = None,
+        overwrite: bool = False,
     ) -> PipelineArtifacts:
         require_input_file(media_path)
         ffmpeg, ffprobe = self.context.tools.require_media_tools()
-        stem = media_stem(media_path)
+        layout = self.output_layout_for(media_path, output_dir, output_name, overwrite)
         media = probe_media(ffprobe, media_path)
+        timeline_duration = bounded_duration(media.duration, limit_seconds)
         candidates = load_candidates(candidates_json)
-        words = load_transcript_words(transcript_json) if transcript_json else []
-        deletions = protected_candidate_delete_ranges(candidates, words, media.duration, media.video.fps)
-        mapper = TimelineMapper(media.duration, media.video.fps, deletions)
+        words = limit_words(load_transcript_words(transcript_json), timeline_duration) if transcript_json else []
+        deletions = protected_candidate_delete_ranges(candidates, words, timeline_duration, media.video.fps)
+        mapper = TimelineMapper(timeline_duration, media.video.fps, deletions)
 
         mapped_words = mapper.remap_words(words)
         cues = polish_cues(group_words(mapped_words))
-        srt_path = self.context.paths.output_path(f"{stem}_cut.srt")
+        srt_path = layout.output_path(self.context, f"{layout.stem}_cut.srt")
         write_srt(cues, srt_path)
 
         vtt_path = ass_path = emphasis_ass_path = None
         transcript_md = transcript_txt = transcript_csv = None
         edit_diff_json = edit_diff_md = None
         if extra_exports:
-            vtt_path = self.context.paths.output_path(f"{stem}_cut.vtt")
-            ass_path = self.context.paths.output_path(f"{stem}_cut.ass")
-            emphasis_ass_path = self.context.paths.output_path(f"{stem}_cut_emphasis.ass")
+            vtt_path = layout.output_path(self.context, f"{layout.stem}_cut.vtt")
+            ass_path = layout.output_path(self.context, f"{layout.stem}_cut.ass")
+            emphasis_ass_path = layout.output_path(self.context, f"{layout.stem}_cut_emphasis.ass")
             write_vtt(cues, vtt_path)
-            write_ass(cues, ass_path, title=f"{stem} subtitles")
-            write_ass(cues, emphasis_ass_path, title=f"{stem} emphasis subtitles", emphasize=True)
-            transcript_md = self.context.paths.output_path(f"{stem}_transcript.md")
-            transcript_txt = self.context.paths.output_path(f"{stem}_transcript.txt")
-            transcript_csv = self.context.paths.output_path(f"{stem}_transcript.csv")
-            write_transcript_markdown(words, transcript_md, stem)
+            write_ass(cues, ass_path, title=f"{layout.stem} subtitles")
+            write_ass(cues, emphasis_ass_path, title=f"{layout.stem} emphasis subtitles", emphasize=True)
+            transcript_md = layout.output_path(self.context, f"{layout.stem}_transcript.md")
+            transcript_txt = layout.output_path(self.context, f"{layout.stem}_transcript.txt")
+            transcript_csv = layout.output_path(self.context, f"{layout.stem}_transcript.csv")
+            write_transcript_markdown(words, transcript_md, layout.stem)
             write_transcript_text(words, transcript_txt)
             write_transcript_csv(words, transcript_csv)
-            edit_diff_json = self.context.paths.output_path(f"{stem}_edit_diff.json")
-            edit_diff_md = self.context.paths.output_path(f"{stem}_edit_diff.md")
+            edit_diff_json = layout.output_path(self.context, f"{layout.stem}_edit_diff.json")
+            edit_diff_md = layout.output_path(self.context, f"{layout.stem}_edit_diff.md")
             write_edit_diff(
-                summarize_edit_diff(words, deletions, mapper.edited_duration, media.duration),
+                summarize_edit_diff(words, deletions, mapper.edited_duration, timeline_duration),
                 edit_diff_json,
                 edit_diff_md,
             )
@@ -311,8 +348,8 @@ class WindowsEditPipeline:
         breath_ranges_path = None
         if stt_audio_path and stt_audio_path.exists() and words:
             noise = measure_noise_floor(stt_audio_path)
-            breath_ranges = detect_breath_ranges(stt_audio_path, words, noise, media.duration)
-            breath_ranges_path = self.context.paths.output_path(f"{stem}_breath_ranges.json")
+            breath_ranges = detect_breath_ranges(stt_audio_path, words, noise, timeline_duration)
+            breath_ranges_path = layout.output_path(self.context, f"{layout.stem}_breath_ranges.json")
             write_json(
                 breath_ranges_path,
                 {
@@ -324,7 +361,7 @@ class WindowsEditPipeline:
 
         clean_wav_path = None
         if clean_wav_enabled:
-            clean_wav_path = self.context.paths.output_path(f"{stem}_cut_audio.wav")
+            clean_wav_path = layout.output_path(self.context, f"{layout.stem}_cut_audio.wav")
             make_clean_wav(
                 ffmpeg,
                 media_path,
@@ -334,24 +371,27 @@ class WindowsEditPipeline:
                 audio_preset=audio_preset,
                 noise_floor_db=noise.noise_floor_db if noise else None,
                 breath_ranges=breath_ranges,
+                limit_seconds=timeline_duration if limit_seconds is not None else None,
             )
 
-        xml_path = self.context.paths.output_path(f"{stem}_cut.xml")
+        xml_path = layout.output_path(self.context, f"{layout.stem}_cut.xml")
+        media_for_xml = replace(media, duration=timeline_duration) if limit_seconds is not None else media
         xml_path.write_text(
-            build_fcp7_xml(media, mapper.keeps, f"{stem} [Windows rough cut]", clean_wav_path),
+            build_fcp7_xml(media_for_xml, mapper.keeps, f"{layout.stem} [Windows rough cut]", clean_wav_path),
             encoding="utf-8",
             newline="\n",
         )
-        report_path = self.context.paths.output_path(f"{stem}_report.html")
+        report_path = layout.output_path(self.context, f"{layout.stem}_report.html")
         write_report(
             report_path,
-            stem,
+            layout.stem,
             candidates,
             {
                 "preset": preset_name,
-                "duration": media.duration,
+                "duration": timeline_duration,
+                "source_duration": media.duration,
                 "edited_duration": mapper.edited_duration,
-                "removed_duration": max(0.0, media.duration - mapper.edited_duration),
+                "removed_duration": max(0.0, timeline_duration - mapper.edited_duration),
                 "deletion_ranges": len(deletions),
                 "keep_ranges": len(mapper.keeps),
                 "auto_delete_candidates": sum(1 for c in candidates if c.auto_delete and not c.requires_review),
@@ -361,13 +401,15 @@ class WindowsEditPipeline:
                 "breath_ranges": len(breath_ranges),
             },
         )
-        keep_ranges_path = self.context.paths.output_path(f"{stem}_keep_ranges.json")
+        keep_ranges_path = layout.output_path(self.context, f"{layout.stem}_keep_ranges.json")
         write_json(
             keep_ranges_path,
             {
                 "deletions": [d.__dict__ for d in deletions],
                 "keeps": [k.__dict__ for k in mapper.keeps],
                 "edited_duration": mapper.edited_duration,
+                "source_duration": media.duration,
+                "timeline_duration": timeline_duration,
                 "speech_boundary_protection": True,
             },
         )
@@ -389,7 +431,7 @@ class WindowsEditPipeline:
         )
 
     def run(self, options: PipelineOptions) -> PipelineArtifacts:
-        stem = media_stem(options.input_path)
+        layout = self.output_layout(options)
         manifest = ArtifactManifest(
             media_path=str(options.input_path),
             preset=options.preset_name,
@@ -398,6 +440,13 @@ class WindowsEditPipeline:
             limit_seconds=options.limit_seconds,
         )
         manifest.metadata["claude"] = self.context.claude.summary()
+        manifest.metadata["output"] = {
+            "dir": "/".join(layout.dir_parts) if layout.dir_parts else None,
+            "name": layout.stem,
+            "overwrite": options.overwrite,
+            "stt_limit_seconds": options.stt_limit_seconds,
+            "transcription_limit_seconds": transcription_limit(options),
+        }
         result, transcript_json, stt_audio = self.transcribe(options)
         manifest.add("transcript_json", transcript_json)
         manifest.add("stt_audio", stt_audio)
@@ -416,6 +465,10 @@ class WindowsEditPipeline:
             transcript_json,
             stt_audio,
             options.advanced_audio_analysis,
+            limit_seconds=options.limit_seconds,
+            output_dir=options.output_dir,
+            output_name=options.output_name,
+            overwrite=options.overwrite,
         )
         manifest.add("cut_candidates_json", candidates_json)
         candidate_payload = read_json(candidates_json)
@@ -430,10 +483,14 @@ class WindowsEditPipeline:
             audio_preset=options.audio_preset,
             stt_audio_path=stt_audio,
             extra_exports=options.extra_exports,
+            limit_seconds=options.limit_seconds,
+            output_dir=options.output_dir,
+            output_name=options.output_name,
+            overwrite=options.overwrite,
         )
         for key, path in exported.__dict__.items():
             manifest.add(key, path)
-        manifest_path = self.context.paths.output_path(f"{stem}_manifest.json")
+        manifest_path = layout.output_path(self.context, f"{layout.stem}_manifest.json")
         manifest.write(manifest_path)
         return PipelineArtifacts(
             transcript_json=transcript_json,
@@ -456,6 +513,35 @@ class WindowsEditPipeline:
             manifest_json=manifest_path,
         )
 
+    def output_layout(self, options: PipelineOptions) -> OutputLayout:
+        return self.output_layout_for(options.input_path, options.output_dir, options.output_name, options.overwrite)
+
+    def output_layout_for(
+        self,
+        input_path: Path,
+        output_dir: str | None = None,
+        output_name: str | None = None,
+        overwrite: bool = False,
+    ) -> OutputLayout:
+        dir_parts = output_dir_parts(output_dir)
+        outdir = self.context.paths.output_dir.joinpath(*dir_parts).resolve()
+        ensure_inside(outdir, self.context.paths.output_dir.resolve())
+        stem = safe_output_component(output_name or media_stem(input_path))
+        if output_name is None and not overwrite:
+            manifest_path = outdir / f"{stem}_manifest.json"
+            if manifest_path.exists():
+                try:
+                    existing = read_json(manifest_path)
+                except Exception as exc:
+                    raise RuntimeErrorWithHint(
+                        f"Existing manifest is not valid JSON: {manifest_path}\n"
+                        "Rerun with --overwrite, --output-name, or --output-dir to choose a new target."
+                    ) from exc
+                existing_media = existing.get("media_path") if isinstance(existing, dict) else None
+                if existing_media and not same_media_path(Path(existing_media), input_path):
+                    stem = f"{stem}_{short_path_hash(input_path)}"
+        return OutputLayout(dir_parts=dir_parts, stem=stem)
+
 
 def load_transcript_words(path: Path) -> list[TranscriptWord]:
     data = read_json(path)
@@ -474,6 +560,53 @@ def load_transcript_words(path: Path) -> list[TranscriptWord]:
 def load_candidates(path: Path) -> list[CutCandidate]:
     data = read_json(path)
     return [CutCandidate(**candidate) for candidate in data["candidates"]]
+
+
+def output_dir_parts(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    raw = Path(value)
+    if raw.is_absolute():
+        raise RuntimeErrorWithHint("Output directory must be relative to the project output directory.")
+    parts: list[str] = []
+    for part in raw.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise RuntimeErrorWithHint("Output directory cannot contain '..'.")
+        parts.append(safe_output_component(part))
+    return tuple(parts)
+
+
+def same_media_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return str(left).casefold() == str(right).casefold()
+
+
+def bounded_duration(media_duration: float, limit_seconds: float | None) -> float:
+    if limit_seconds is None:
+        return media_duration
+    if limit_seconds <= 0:
+        raise RuntimeErrorWithHint("--limit-seconds and --smoke-seconds must be greater than 0.")
+    return min(media_duration, limit_seconds)
+
+
+def transcription_limit(options: PipelineOptions) -> float | None:
+    limit = options.stt_limit_seconds if options.stt_limit_seconds is not None else options.limit_seconds
+    if limit is not None and limit <= 0:
+        raise RuntimeErrorWithHint("--stt-limit-seconds must be greater than 0.")
+    return limit
+
+
+def limit_words(words: list[TranscriptWord], duration: float) -> list[TranscriptWord]:
+    limited: list[TranscriptWord] = []
+    for word in words:
+        if word.start >= duration:
+            continue
+        limited.append(replace(word, end=min(word.end, duration)))
+    return limited
 
 
 def require_input_file(path: Path) -> None:

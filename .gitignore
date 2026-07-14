@@ -26,6 +26,7 @@ wheels/
 
 # Test and coverage output
 .test_tmp/
+.test_tmp*/
 .coverage
 .coverage.*
 coverage.xml
@@ -61,10 +62,3 @@ _upstream_compare_original/
 .DS_Store
 Thumbs.db
 Desktop.ini
-input/*.mp4
-input/*.mov
-input/*.mkv
-input/*.avi
-output/
-input/*.mp4
-output/

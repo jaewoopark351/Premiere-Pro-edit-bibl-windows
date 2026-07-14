@@ -1,715 +1,261 @@
 # Premiere Pro Edit Bibl Windows
 
-## 2026-07-14 Phase 2-4 Windows Port Update
+Windows 11 + NVIDIA CUDA 환경에서 말하는 영상의 러프컷 자료를 생성하는 Premiere Pro 편집 보조 도구입니다.
 
-The Windows port now includes working Phase 2-4 entry points in addition to the
-core FCP7 XML/SRT pipeline.
+원본 프로젝트는 `biblcontentofficial-art/Premiere-Pro-edit-bibl`입니다. 이 저장소는 원본의 목적과 MIT 라이선스/크레딧을 보존하면서, macOS/Apple Silicon/`mlx-whisper`/shell script 흐름을 Windows PowerShell + PyTorch CUDA + Adobe Premiere Pro FCP7 XML 흐름으로 포팅한 버전입니다.
 
-New default `run` exports:
+원본 저작권과 크레딧은 [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [docs/FEATURE_PARITY_REPORT.md](docs/FEATURE_PARITY_REPORT.md)에 유지되어 있습니다.
 
-- `output\<base>_cut.vtt`
-- `output\<base>_cut.ass`
-- `output\<base>_cut_emphasis.ass`
-- `output\<base>_transcript.md`
-- `output\<base>_transcript.txt`
-- `output\<base>_transcript.csv`
-- `output\<base>_edit_diff.json`
-- `output\<base>_edit_diff.md`
-- `output\<base>_breath_ranges.json`
+## 대상 환경
 
-Disable those extra exports only when you need the old minimal output set:
+이 프로젝트는 저사양 PC 지원 프로젝트가 아닙니다.
 
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -NoExtraExports
-```
+- Windows 11
+- Python 3.12 64-bit 권장
+- NVIDIA CUDA PyTorch
+- 개발 및 검증 기준: NVIDIA RTX 5070 Ti 16GB 이상
+- RAM 32GB 이상, 64GB 권장
+- `ffmpeg.exe`, `ffprobe.exe` 필수
+- 기본 STT 모델: `openai/whisper-large-v3`
+- Adobe Premiere Pro에서 FCP7 XML/SRT를 수동 import
 
-Clean WAV audio presets:
+GPU가 RTX 5070 Ti 16GB보다 낮아도 설치를 강제로 막지는 않습니다. 다만 CUDA 메모리 부족이나 처리 속도 저하가 발생할 수 있습니다. 이 포트는 Whisper 모델을 자동으로 turbo나 소형 모델로 낮추지 않습니다.
 
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -CleanWav -AudioPreset natural
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -CleanWav -AudioPreset podcast
-```
+## 현재 구현 상태
 
-The clean WAV path can now use measured noise floor, FFmpeg `afftdn`,
-high-pass filtering, compression, LUFS normalization, de-essing, and detected
-breath-range attenuation. These filters are applied only to generated output
-files; the source video is never modified.
+완전 구현 또는 기본 사용 가능:
 
-Video analysis and preset recommendation:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli analyze-video ".\input\my_video.mp4" --print
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli recommend-preset ".\input\my_video.mp4"
-```
-
-Shorts / vertical 9:16 XML:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli shorts ".\input\my_video.mp4" "00:12-00:28" "01:10-01:35" --transcript ".\output\my_video_transcript.json"
-```
-
-Add `--render-mp4` only when you also want FFmpeg/NVENC to render vertical MP4
-files. XML-only shorts are safer and faster for Premiere editing.
-
-Two-camera sync and multicam XML:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli sync-2cam ".\input\cam_a.mp4" ".\input\cam_b.mp4"
-
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli multicam-xml ".\input\master.mp4" `
-  --camera ".\input\cam_b.mp4" 1.25 `
-  --keep-ranges ".\output\master_keep_ranges.json" `
-  --clean-audio ".\output\master_cut_audio.wav"
-```
-
-Current caveats:
-
-- Acoustic filler and breath detection are conservative review signals, not
-  aggressive automatic deletion.
-- Shorts generation is Premiere XML-first. MP4 rendering is optional.
-- Multicam XML uses explicit offsets from `sync-2cam` or user input; it does
-  not automatically choose camera angles.
-- Premiere import still depends on Premiere Pro's FCP7 XML parser behavior for
-  Windows `file:///C:/...` media paths.
-
-Windows와 NVIDIA CUDA 환경에서 말하는 영상의 러프컷 자료를 만드는 Premiere Pro 편집 보조 도구입니다.
-
-원본 오픈소스 `Premiere-Pro-edit-bibl`은 macOS/Apple Silicon/`mlx-whisper`/`edit.sh` 중심 프로젝트입니다. 이 저장소는 그 목적을 Windows에서 쓰기 위해 다시 구성한 포팅본입니다. 따라서 README의 명령은 Windows PowerShell 기준이며, 원본과 1:1로 완전히 같은 기능을 제공한다고 보지 않아야 합니다.
-
-원본 대비 기능 차이는 [docs/FEATURE_PARITY_REPORT.md](docs/FEATURE_PARITY_REPORT.md)에 실제 호출 경로 기준으로 정리했습니다.
-
-## 무엇을 해주나요
-
-입력 영상 1개를 받아 다음 산출물을 만듭니다.
-
-- Whisper 계열 STT 전사 JSON
-- 무음, 반복, false-start, 짧은 발화 기반 컷 후보 JSON
-- Premiere Pro에서 가져올 수 있는 FCP7 XML 러프컷
-- 컷 타임라인에 맞춘 SRT 자막
-- HTML 리포트
-- 실행 메타데이터 manifest
-- 선택 시 정리된 WAV 오디오
-
-중요: 현재 버전은 완성 MP4를 바로 렌더링하지 않습니다. 결과물은 `output\*_cut.xml`이며, Premiere Pro에서 XML을 가져온 뒤 사용자가 최종 확인과 내보내기를 합니다.
-
-## 현재 지원 범위
-
-지원합니다.
-
-- Windows 11 기준 실행
-- NVIDIA CUDA PyTorch 사용
-- ffmpeg/ffprobe 기반 미디어 분석
 - Transformers Whisper 기반 한국어 STT
+- 무음/반복/false-start/짧은 발화 기반 컷 후보 생성
+- keep range 생성
 - FCP7 XML 생성
-- SRT 자막 생성
-- HTML 리포트 생성
-- `.claude\agents`, `.claude\skills` 프로젝트 자산 인식
-- PowerShell 래퍼 `install.ps1`, `run.ps1`, `batch.ps1`
+- Premiere용 Windows `file://` media URI 생성
+- SRT, VTT, ASS, 강조 ASS 생성
+- transcript Markdown/TXT/CSV export
+- edit diff JSON/Markdown
+- HTML 리포트
+- clean WAV 생성
+- 하이패스, 컴프레서, LUFS 정규화, de-esser, `afftdn` 노이즈 제거
+- `natural`, `podcast` 오디오 프리셋
+- 노이즈 플로어 측정
+- 숨소리 후보 감지 및 clean WAV에서 감쇠
+- 영상 분석과 자동 프리셋 추천
+- 폴더 일괄 처리
+- 쇼츠용 세로 FCP7 XML, 선택적 MP4 렌더
+- 2카메라 오디오 동기화
+- explicit offset 기반 multicam XML
+- switch interval 기반 자동 카메라 전환 XML
+- Premiere XML/SRT import 및 선택적 export JSX 생성
+- Premiere Pro 실행기 진입점
+- `.claude` agent/skill 자산 인식 및 manifest 기록
 
-아직 원본과 동일하다고 볼 수 없는 영역입니다.
+부분 구현 또는 검토용 구현:
 
-- 원본 `engine\auto_cut.py`의 모든 세부 로직
-- macOS용 `mlx-whisper`
-- `edit.sh`, `batch.sh`
-- VTT/ASS 자막 생성
-- transcript Markdown export
-- 편집 전후 diff
-- 음향 기반 필러 감지
-- 문장 끝 음절 보호
-- 숨소리 축소
-- 노이즈 플로어 기반 노이즈 제거
-- 치찰음 감소
-- natural/podcast 오디오 프리셋
-- 쇼츠 자동 제작
-- 멀티캠 자동 편집
-- 강조 자막 ASS 고급 생성
-- Premiere Pro에서 자동 렌더링까지 완료하는 기능
+- 음향 기반 필러 감지는 review 후보로만 사용합니다.
+- 문장 끝 보호는 silence 기반 자동 삭제 범위에 적용됩니다.
+- false-start와 필러 후보는 보수적으로 review 중심입니다.
+- shorts MP4 렌더는 선택 기능이며 NVENC/FFmpeg 환경에 좌우됩니다.
+- 자동 카메라 전환은 keep range를 일정 간격으로 나누는 보수적 round-robin 휴리스틱입니다.
+- Premiere 자동 렌더링은 JSX 스크립트/실행기 제공 범위이며 Premiere 내부 실행 결과는 수동 검증이 필요합니다.
 
-## 폴더 구조
+미구현:
 
-```text
-Premiere-Pro-edit-bibl-windows\
-  .claude\                 Claude/Codex용 agents, skills
-  config\                  컷 프리셋 JSON
-  input\                   입력 영상을 두기 좋은 폴더
-  output\                  실행 결과물
-  src\bibl_windows\        Windows 포팅본 Python 코드
-  tests\                   테스트
-  install.ps1              Windows 설치 스크립트
-  run.ps1                  단일 영상 실행 스크립트
-  batch.ps1                폴더 일괄 처리 스크립트
-  requirements-windows.txt Windows 의존성
+- 원본 macOS `edit.sh`, `batch.sh`, `mlx-whisper` 경로
+- 원본의 모든 세부 휴리스틱과 동일한 자동 컷 판단
+
+## 설치
+
+PowerShell 실행 정책 때문에 `.ps1` 실행이 막히면, 현재 세션에서만 우회해서 실행합니다.
+
+```powershell
+cd C:\Vtuber_Souorce_Code\Claude\Premiere-Pro-edit-bibl-windows
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-## 요구 사항
+설치 스크립트는 다음을 확인합니다.
 
-필수:
+- Windows Python launcher `py`
+- Python 3.12 64-bit
+- 기존 `.venv` Python 정보
+- FFmpeg/FFprobe PATH
+- NVIDIA GPU와 VRAM 정보
+- CUDA PyTorch cu128 패키지
+- `constraints-windows-cu128.txt` 기반 Windows 의존성
 
-- Windows 11 권장
-- Python 3.12 권장
-- `ffmpeg.exe`, `ffprobe.exe`
-- NVIDIA GPU 권장
-- Adobe Premiere Pro
+수동 설치:
 
-Python 버전:
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install --force-reinstall "torch==2.11.0+cu128" "torchvision==0.26.0+cu128" "torchaudio==2.11.0+cu128" --index-url https://download.pytorch.org/whl/cu128
+.\.venv\Scripts\python.exe -m pip install -r requirements-windows.txt -c constraints-windows-cu128.txt
+.\.venv\Scripts\python.exe -m pip install -e .
+```
 
-- 권장: Python 3.12
-- 허용: Python 3.10 이상, 3.13 미만
-- Python launcher `py`가 설치되어 있으면 `install.ps1`이 편합니다.
+설치 확인:
 
-GPU:
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
+```
 
-- 권장: NVIDIA GPU + CUDA PyTorch
-- CPU도 `--allow-cpu-fallback`으로 실행할 수 있지만 매우 느릴 수 있습니다.
+## FFmpeg 설치
 
-ffmpeg:
-
-- `ffmpeg.exe`와 `ffprobe.exe`가 PATH에 있어야 합니다.
-- 설치 후 아래 명령이 PowerShell에서 동작해야 합니다.
+`ffmpeg.exe`와 `ffprobe.exe`가 PATH에 있어야 합니다.
 
 ```powershell
 ffmpeg.exe -version
 ffprobe.exe -version
 ```
 
-## 처음 설치
-
-PowerShell을 열고 프로젝트 폴더로 이동합니다.
+Winget 예시:
 
 ```powershell
-cd C:\Vtuber_Souorce_Code\Premiere-Pro-edit-bibl-windows
+winget install Gyan.FFmpeg
 ```
 
-설치 스크립트를 실행합니다.
+설치 후 새 PowerShell을 열어 PATH를 다시 읽게 하세요.
 
-```powershell
-.\install.ps1
-```
+## 실행
 
-`install.ps1`이 하는 일:
-
-- `.venv` 가상환경 생성
-- pip 업그레이드
-- CUDA 12.8용 PyTorch 설치
-- Windows 의존성 설치
-- 현재 프로젝트 editable 설치
-- `doctor` 진단 실행
-
-설치가 끝나면 아래 명령으로 상태를 다시 확인합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-정상이라면 대략 이런 정보를 볼 수 있습니다.
-
-```text
-ffmpeg path
-ffprobe path
-torch_available: true
-cuda_available: true
-gpu_name: ...
-claude.exists: true
-```
-
-## 수동 설치
-
-`install.ps1`을 쓰지 않고 직접 설치하려면 아래 순서대로 실행합니다.
-
-```powershell
-cd C:\Vtuber_Souorce_Code\Premiere-Pro-edit-bibl-windows
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-.\.venv\Scripts\python.exe -m pip install -r requirements-windows.txt
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-CPU-only torch가 설치되면 CUDA가 잡히지 않습니다. 이때는 PyTorch CUDA wheel을 다시 설치합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-## 빠른 동작 확인
-
-테스트를 실행합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m pytest -q
-```
-
-현재 기준 정상 결과 예시:
-
-```text
-42 passed
-```
-
-`.claude` 프로젝트 자산 인식도 확인합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude
-```
-
-정상 예시:
-
-```json
-{
-  "exists": true,
-  "agent_count": 6,
-  "skill_count": 7
-}
-```
-
-상세 JSON이 필요하면 파일로 저장합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude --full --output output\claude_full_ascii.json --ascii-output
-Get-Content .\output\claude_full_ascii.json
-```
-
-`\uc601\uc0c1` 같은 표기는 깨진 것이 아닙니다. PowerShell 인코딩 문제를 피하기 위한 JSON Unicode escape입니다. JSON으로 읽으면 원래 한글로 복원됩니다.
-
-## 입력 영상 준비
-
-가장 단순한 방법은 `input` 폴더에 영상 파일을 넣는 것입니다.
-
-예시:
-
-```text
-C:\Vtuber_Souorce_Code\Premiere-Pro-edit-bibl-windows\input\my_video.mp4
-```
-
-지원 확장자는 주로 `mp4`, `mov`, `m4v`, `mkv`입니다. ffmpeg가 읽을 수 있는 영상이면 대부분 처리 가능합니다.
-
-## 30초 스모크 테스트
-
-긴 영상 전체를 돌리기 전에 30초만 먼저 확인합니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\test.mp4.mp4" --limit-seconds 30 --allow-cpu-fallback
-```
-
-PowerShell 래퍼를 쓰는 방법:
-
-```powershell
-.\run.ps1 -InputPath ".\input\test.mp4.mp4" -Preset standard -LimitSeconds 30 -AllowCpuFallback
-```
-
-GPU가 정상이라면 `--allow-cpu-fallback`이나 `-AllowCpuFallback`은 없어도 됩니다. 다만 모델이나 CUDA 문제로 실패할 때 임시 확인용으로 붙일 수 있습니다.
-
-## dry-run 확인
-
-STT나 ffmpeg 변환을 돌리기 전에 입력 경로, 도구 상태, 예상 출력 파일명을 확인할 수 있습니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --dry-run
-```
-
-PowerShell 래퍼:
+dry-run:
 
 ```powershell
 .\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -DryRun
 ```
 
-## 실제 영상 전체 실행
-
-Python CLI:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard
-```
-
-PowerShell 래퍼:
-
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard
-```
-
-정리 WAV까지 만들려면 `--clean-wav` 또는 `-CleanWav`를 붙입니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --clean-wav
-```
+전체 실행:
 
 ```powershell
 .\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -CleanWav
 ```
 
-CUDA 메모리가 부족하면 STT 배치 크기를 1로 유지하고 더 작은 turbo 모델을 사용할 수 있습니다.
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --clean-wav --stt-batch-size 1 --model openai/whisper-large-v3-turbo
-```
-
-RTX 5070 Ti 16GB 기준 기본 STT 설정은 `--stt-batch-size 1 --stt-chunk-seconds 25`입니다. `large-v3`에서 아주 조금 더 여유가 필요하면 `-SttChunkSeconds 22`처럼 낮춥니다.
-
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -CleanWav -SttBatchSize 1 -SttChunkSeconds 22
-```
-
-## 프리셋
-
-프리셋은 `config` 폴더에 있습니다.
-
-```text
-config\conservative.json
-config\standard.json
-config\aggressive.json
-```
-
-선택 기준:
-
-- `conservative`: 적게 자름. 자연스러움 우선.
-- `standard`: 기본값. 대부분의 테스트와 일반 영상에 권장.
-- `aggressive`: 더 많이 자름. 결과 확인과 수동 보정 필요.
-
-사용 예:
-
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset conservative
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset aggressive
-```
-
-## 일괄 처리
-
-폴더 안의 영상들을 순서대로 처리합니다.
-
-```powershell
-.\batch.ps1 -InputDirectory ".\input" -Preset standard
-```
-
-30초씩만 테스트:
-
-```powershell
-.\batch.ps1 -InputDirectory ".\input" -Preset standard -LimitSeconds 30
-```
-
-정리 WAV 포함:
-
-```powershell
-.\batch.ps1 -InputDirectory ".\input" -Preset standard -CleanWav
-```
-
-## 명령어 목록
-
-진단:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-`.claude` 자산 확인:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude
-```
-
-미디어 정보 확인:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli probe ".\input\my_video.mp4"
-```
-
-전사만 실행:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli transcribe ".\input\my_video.mp4" --preset standard --limit-seconds 30
-```
-
-컷 후보 분석:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli analyze-cuts ".\input\my_video.mp4" --preset standard --transcript ".\output\my_video_transcript.json"
-```
-
-이미 만든 후보와 전사 JSON으로 XML/SRT만 export:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli export ".\input\my_video.mp4" --preset standard --candidates ".\output\my_video_cut_candidates.json" --transcript ".\output\my_video_transcript.json"
-```
-
-전체 파이프라인:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard
-```
-
-분석 전용 dry-run:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --dry-run
-```
-
-## 산출물
-
-모든 결과는 `output` 폴더에 생성됩니다.
-
-예를 들어 입력 파일이 `my_video.mp4`라면:
-
-```text
-output\my_video_transcript.json        STT 전사 결과
-output\my_video_stt_audio.wav          전체 실행 STT용 오디오
-output\my_video_stt_30s.wav            제한 실행 STT용 오디오
-output\my_video_cut_candidates.json    컷 후보
-output\my_video_cut.xml                Premiere Pro 가져오기용 FCP7 XML
-output\my_video_cut.srt                컷 타임라인 기준 자막
-output\my_video_report.html            컷 리포트
-output\my_video_keep_ranges.json       유지 구간/삭제 구간
-output\my_video_cut_audio.wav          선택 시 생성되는 정리 WAV
-output\my_video_manifest.json          실행 메타데이터
-```
-
-가장 중요한 파일은:
-
-```text
-output\my_video_cut.xml
-output\my_video_cut.srt
-output\my_video_report.html
-```
-
-## Premiere Pro에서 열기
-
-이 프로젝트의 Premiere 연동은 Premiere를 직접 원격 조종하거나 자동 렌더링하는 방식이 아니라, Premiere Pro가 가져올 수 있는 FCP7 XML과 SRT를 생성하는 방식입니다.
-
-1. Premiere Pro를 엽니다.
-2. 새 프로젝트를 만들거나 기존 프로젝트를 엽니다.
-3. `파일 > 가져오기`를 선택합니다.
-4. `output\my_video_cut.xml`을 가져옵니다.
-5. 생성된 시퀀스를 열어 컷을 확인합니다.
-6. 필요하면 `output\my_video_cut.srt`도 자막으로 가져옵니다.
-7. 컷이 어색한 부분은 Premiere에서 직접 조정합니다.
-8. 최종 MP4는 Premiere Pro에서 내보내기 합니다.
-
-현재 Python 도구는 MP4 렌더링까지 하지 않습니다. XML은 편집 지시서이고, 실제 완성 영상은 Premiere Pro에서 내보냅니다.
-
-## PowerShell 주의 사항
-
-명령은 한 줄씩 실행하세요.
-
-좋은 예:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude
-.\.venv\Scripts\python.exe -B -m pytest -q
-```
-
-`>>`가 보이면 PowerShell이 여러 줄 입력 모드에 들어간 것입니다. 이전 줄에서 따옴표나 괄호가 닫히지 않았거나, 여러 명령을 한 번에 붙여넣은 경우가 많습니다. `Ctrl+C`로 빠져나온 뒤 한 줄씩 다시 실행하세요.
-
-한글 출력이 깨질 때:
-
-- 기본 확인은 `claude` 요약 출력만 사용하세요.
-- 상세 JSON은 `--ascii-output`을 쓰세요.
-- `\uc601\uc0c1` 같은 문자열은 JSON Unicode escape이며 정상입니다.
-
-## 자주 발생하는 문제
-
-### ffmpeg를 찾을 수 없음
-
-증상:
-
-```text
-ffmpeg.exe was not found on PATH.
-```
-
-해결:
-
-- ffmpeg를 설치합니다.
-- `ffmpeg.exe`와 `ffprobe.exe`가 PATH에 있는지 확인합니다.
-
-```powershell
-ffmpeg.exe -version
-ffprobe.exe -version
-```
-
-### CUDA가 안 잡힘
-
-증상:
-
-```text
-cuda_available: false
-```
-
-해결:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-그래도 안 되면 GPU 드라이버와 CUDA 지원 상태를 확인하세요.
-
-### CUDA out of memory
-
-증상:
-
-```text
-torch.OutOfMemoryError: CUDA out of memory
-```
-
-해결:
-
-- 다른 GPU 프로그램을 닫습니다.
-- 기본값인 `--stt-batch-size 1`을 유지합니다.
-- `large-v3`를 유지하려면 `--stt-chunk-seconds 25`보다 조금 낮춥니다.
-- 긴 영상이나 VRAM 부족 상황에서는 `openai/whisper-large-v3-turbo` 모델을 사용합니다.
-
-```powershell
-.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -CleanWav -SttBatchSize 1 -SttChunkSeconds 22
-```
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --clean-wav --stt-batch-size 1 --model openai/whisper-large-v3-turbo
-```
-
-### 모델 다운로드 경고
-
-처음 Whisper 모델을 사용할 때 Hugging Face 모델 파일을 내려받을 수 있습니다. 네트워크나 캐시 상태에 따라 시간이 걸릴 수 있습니다.
-
-다음 경고는 실패가 아니라 안내일 수 있습니다.
-
-```text
-Warning: You are sending unauthenticated requests to the HF Hub.
-```
-
-### 입력 파일이 없다고 나옴
-
-증상:
-
-```text
-Input media file was not found
-```
-
-해결:
-
-- 예시 경로를 그대로 쓰지 마세요.
-- 실제 파일 경로를 넣으세요.
-- 경로에 공백이 있으면 따옴표로 감싸세요.
-
-```powershell
-.\run.ps1 -InputPath "C:\Users\me\Videos\recording.mp4"
-```
-
-### XML은 있는데 MP4가 없음
-
-정상입니다. 이 도구는 Premiere Pro에서 가져올 XML과 SRT를 만듭니다. 완성 MP4는 Premiere Pro에서 내보내야 합니다.
-
-## Claude/Codex를 위한 프로젝트 메모
-
-이 섹션은 Claude, Codex, 다른 AI 코딩 에이전트가 프로젝트를 빠르게 이해하도록 작성되었습니다.
-
-### 프로젝트 정체성
-
-- 이 저장소는 원본 `Premiere-Pro-edit-bibl`의 Windows/NVIDIA CUDA 포팅본입니다.
-- 원본 macOS README의 `edit.sh`, `mlx-whisper`, `engine\*.py` 전체 기능을 그대로 실행하는 프로젝트가 아닙니다.
-- 현재 권위 있는 실행 경로는 `src\bibl_windows` 패키지와 PowerShell 래퍼입니다.
-- 사용자는 Premiere Pro에서 가져올 수 있는 러프컷 XML/SRT를 원합니다.
-- 완성 MP4 자동 렌더링을 지원한다고 말하지 마세요.
-
-### 가장 중요한 명령
-
-상태 확인:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
-```
-
-`.claude` 확인:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude
-```
-
-테스트:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m pytest -q
-```
-
 30초 스모크 테스트:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\test.mp4.mp4" --limit-seconds 30 --allow-cpu-fallback
+.\run.ps1 -InputPath ".\input\my_video.mp4" -Preset standard -SmokeSeconds 30
 ```
 
-실제 실행:
+직접 Python CLI:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli run ".\input\my_video.mp4" --preset standard --clean-wav
 ```
 
-### `.claude` 자산
+중요 옵션:
 
-현재 프로젝트는 다음을 읽습니다.
+- `--limit-seconds N` / `-LimitSeconds N`: STT, 무음 분석, 컷 후보, XML, 자막, 리포트 전체를 첫 N초로 제한합니다.
+- `--smoke-seconds N` / `-SmokeSeconds N`: `--limit-seconds`와 같은 전체 파이프라인 스모크 제한입니다.
+- `--stt-limit-seconds N` / `-SttLimitSeconds N`: Whisper에 넣는 WAV만 N초로 제한합니다.
+- `--stt-batch-size 1`: RTX 5070 Ti 기준 기본 안전값입니다.
+- `--stt-chunk-seconds 25`: VRAM 점유를 조금 낮추려면 22~25 사이로 조정합니다.
+- `--output-dir NAME`: `output\NAME\...` 아래에 생성합니다.
+- `--output-name NAME`: 산출물 기본 이름을 직접 지정합니다.
+- `--overwrite`: 같은 이름 manifest가 있어도 기존 base name을 재사용합니다.
+- `--debug`: Python traceback을 표시합니다. 평소에는 짧은 오류 메시지만 출력합니다.
 
-```text
-.claude\agents\*.md
-.claude\skills\*\SKILL.md
-```
+## 출력 파일
 
-확인 명령:
+기본 출력 위치는 `output` 폴더입니다.
+
+- `*_transcript.json`: Whisper 전사 결과
+- `*_stt_audio.wav`: STT 입력용 16kHz mono WAV
+- `*_cut_candidates.json`: 컷 후보와 review 데이터
+- `*_keep_ranges.json`: 유지 구간
+- `*_cut.xml`: Premiere Pro import용 FCP7 XML
+- `*_cut.srt`: 컷 타임라인 기준 SRT
+- `*_cut.vtt`: VTT
+- `*_cut.ass`: ASS
+- `*_cut_emphasis.ass`: 강조 ASS
+- `*_transcript.md`, `*_transcript.txt`, `*_transcript.csv`: transcript export
+- `*_edit_diff.json`, `*_edit_diff.md`: 편집 전후 diff
+- `*_report.html`: HTML 리포트
+- `*_cut_audio.wav`: `-CleanWav` 사용 시 생성되는 정리 WAV
+- `*_manifest.json`: 실행 메타데이터
+
+서로 다른 폴더의 같은 파일명 입력이 기존 manifest와 충돌하면, 기본 산출물 이름 뒤에 짧은 경로 해시가 붙습니다.
+
+## Premiere Pro에서 불러오기
+
+1. Premiere Pro를 엽니다.
+2. `File > Import`를 선택합니다.
+3. `output\*_cut.xml`을 가져옵니다.
+4. 같은 폴더의 `*_cut.srt`, `*_cut.ass` 등을 필요한 자막 트랙으로 import합니다.
+5. XML의 media path가 원본 영상을 가리키는지 확인합니다.
+6. 컷과 자막을 수동 검토한 뒤 Premiere에서 최종 렌더링합니다.
+
+네트워크 UNC 경로는 `file://NAS/share/...` URI로 생성됩니다. Premiere 환경에서 UNC import가 불안정하면 네트워크 공유를 드라이브 문자로 매핑한 뒤 실행하세요.
+
+## 추가 명령
+
+영상 분석:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli analyze-video ".\input\my_video.mp4" --print
 ```
 
-상세 확인:
+프리셋 추천:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m bibl_windows.cli claude --full --output output\claude_full_ascii.json --ascii-output
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli recommend-preset ".\input\my_video.mp4"
 ```
 
-실행 manifest에도 `.claude` 요약 정보가 들어갑니다.
+쇼츠 XML:
 
-### 코드 흐름
-
-핵심 엔트리:
-
-```text
-src\bibl_windows\cli.py
-src\bibl_windows\pipeline.py
-src\bibl_windows\runtime.py
-src\bibl_windows\claude_assets.py
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli shorts ".\input\my_video.mp4" "00:12-00:28" --transcript ".\output\my_video_transcript.json"
 ```
 
-전체 실행 흐름:
+2카메라 동기화:
 
-```text
-CLI run
-  -> RuntimeContext.discover()
-  -> ffmpeg/ffprobe 확인
-  -> 입력 파일 검증
-  -> STT용 WAV 추출
-  -> TransformersWhisperBackend.transcribe()
-  -> transcript JSON 저장
-  -> silence/repeat/false-start 후보 분석
-  -> FCP7 XML 생성
-  -> SRT 생성
-  -> HTML report 생성
-  -> manifest JSON 생성
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli sync-2cam ".\input\cam_a.mp4" ".\input\cam_b.mp4"
 ```
 
-### 산출물 의미
+multicam XML:
 
-- `*_cut.xml`: Premiere Pro용 핵심 결과물
-- `*_cut.srt`: 자막
-- `*_report.html`: 사람이 확인할 리포트
-- `*_manifest.json`: 실행 추적 정보
-- `*_cut_audio.wav`: `--clean-wav` 사용 시 생성
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli multicam-xml ".\input\master.mp4" --camera ".\input\cam_b.mp4" 1.25 --keep-ranges ".\output\master_keep_ranges.json"
+```
 
-### AI가 답변할 때 주의할 점
+자동 카메라 전환 XML:
 
-- 원본 README와 현재 Windows 포팅본을 혼동하지 마세요.
-- `README.md`는 이제 Windows 포팅본 기준 문서입니다.
-- 사용자가 “편집된 영상 어디 있어?”라고 물으면 MP4가 아니라 `output\*_cut.xml`이 핵심 결과라고 설명하세요.
-- Premiere Pro에서 XML을 가져온 뒤 최종 MP4를 내보내야 한다고 말하세요.
-- PowerShell에서 `>>`가 보이면 한 줄씩 실행하라고 안내하세요.
-- 한글 JSON 출력이 깨지면 `--ascii-output`을 안내하세요.
-- 테스트는 `.\.venv\Scripts\python.exe -B -m pytest -q`를 기준으로 말하세요.
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli auto-multicam-xml ".\input\master.mp4" --camera ".\input\cam_b.mp4" 1.25 --keep-ranges ".\output\master_keep_ranges.json" --switch-interval 6
+```
 
-## 라이선스와 원본
+Premiere import/export JSX 생성:
 
-이 프로젝트는 원본 오픈소스를 참고해 Windows용으로 재구성한 포팅본입니다. 원본 README를 그대로 실행 문서로 쓰지 말고, 이 README와 `WINDOWS_SETUP.md`, `PORTING_REPORT.md`를 기준으로 사용하세요.
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli premiere-script ".\output\my_video_cut.xml" --srt ".\output\my_video_cut.srt" --output my_video_premiere_import.jsx --export-mp4 my_video_premiere_export.mp4
+```
+
+Premiere 실행:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli premiere-launch --script ".\output\my_video_premiere_import.jsx"
+```
+
+폴더 일괄 처리:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\batch.ps1 -InputDirectory ".\input" -Preset standard -CleanWav
+```
+
+`batch.ps1`은 파일 하나가 실패해도 나머지를 계속 처리하고, 마지막에 성공/실패 목록을 출력합니다.
+
+## 테스트
+
+```powershell
+.\.venv\Scripts\python.exe -B -m pytest -q
+```
+
+현재 테스트에는 Windows URI, 한글/공백/특수문자 경로, UNC URI, output collision, 전체 pipeline limit 전달, CLI 오류 메시지, FCP7 XML 파싱, mocked STT E2E가 포함됩니다.
+
+## 알려진 제한
+
+- Premiere Pro GUI import와 최종 렌더링은 수동 검증이 필요합니다.
+- XML/SRT 생성은 자동 테스트하지만 Premiere 내부 해석 결과까지 자동 보장하지는 않습니다.
+- 자동 카메라 전환은 휴리스틱 기반이므로 컷마다 사람이 최종 확인해야 합니다.
+- Premiere 자동 렌더링은 JSX 생성/실행기까지 제공하며, 실제 Adobe Premiere Pro/Media Encoder 동작은 설치 버전과 preset에 따라 수동 검증해야 합니다.
+- STT 정확도와 컷 품질은 영상 음질, 배경음악, 발화 스타일에 따라 달라집니다.
+- source video는 수정하지 않습니다. 모든 산출물은 `output` 아래에 생성됩니다.

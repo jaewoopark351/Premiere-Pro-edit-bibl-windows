@@ -115,20 +115,32 @@ def ffprobe_json(ffprobe: Path, media: Path) -> dict:
     return json.loads(completed.stdout)
 
 
-def detect_silence(ffmpeg: Path, media: Path, noise_db: float, min_silence: float, duration: float) -> list[TimeRange]:
+def detect_silence(
+    ffmpeg: Path,
+    media: Path,
+    noise_db: float,
+    min_silence: float,
+    duration: float,
+    limit_seconds: float | None = None,
+) -> list[TimeRange]:
+    args = [
+        str(ffmpeg),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        media_input_arg(media),
+    ]
+    if limit_seconds is not None:
+        args += ["-t", f"{limit_seconds:.3f}"]
+    args += [
+        "-af",
+        f"silencedetect=noise={noise_db}dB:d={min_silence}",
+        "-f",
+        "null",
+        "-",
+    ]
     completed = subprocess.run(
-        [
-            str(ffmpeg),
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            media_input_arg(media),
-            "-af",
-            f"silencedetect=noise={noise_db}dB:d={min_silence}",
-            "-f",
-            "null",
-            "-",
-        ],
+        args,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -155,27 +167,31 @@ def make_clean_wav(
     audio_preset: str = "standard",
     noise_floor_db: float | None = None,
     breath_ranges: list[TimeRange] | None = None,
+    limit_seconds: float | None = None,
 ) -> None:
     filter_chain = build_audio_filter_chain(audio_preset, noise_floor_db=noise_floor_db, breath_ranges=breath_ranges)
-    run_checked(
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-y",
-            "-i",
-            media_input_arg(media),
-            "-af",
-            filter_chain,
-            "-vn",
-            "-c:a",
-            "pcm_s16le",
-            "-ar",
-            str(sample_rate),
-            "-ac",
-            str(channels),
-            output_wav,
-        ]
-    )
+    args: list[str | Path] = [
+        ffmpeg,
+        "-hide_banner",
+        "-y",
+        "-i",
+        media_input_arg(media),
+    ]
+    if limit_seconds is not None:
+        args += ["-t", f"{limit_seconds:.3f}"]
+    args += [
+        "-af",
+        filter_chain,
+        "-vn",
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        str(channels),
+        output_wav,
+    ]
+    run_checked(args)
 
 def extract_audio_for_stt(ffmpeg: Path, media: Path, output_wav: Path, limit_seconds: float | None = None) -> None:
     args: list[str | Path] = [
