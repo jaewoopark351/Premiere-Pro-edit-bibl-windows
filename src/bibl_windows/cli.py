@@ -72,20 +72,52 @@ def print_artifacts(artifacts) -> None:
             print(f"{key}={value}")
 
 
-def cmd_doctor(_args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
+    try:
+        report = build_doctor_report()
+    except Exception as exc:
+        data = {"diagnostic_error": str(exc)}
+        print("Error: doctor diagnostics failed before all checks could run.", file=sys.stderr)
+        print_json(data)
+        return 3
+    if args.strict:
+        issues = strict_doctor_issues(report)
+        report["strict"] = {"ok": not issues, "issues": issues}
+        if issues:
+            print("Error: strict doctor checks failed:", file=sys.stderr)
+            for issue in issues:
+                print(f"- {issue}", file=sys.stderr)
+            print_json(report)
+            return 2
+    print_json(report)
+    return 0
+
+
+def build_doctor_report() -> dict:
     context = RuntimeContext.discover()
     ffmpeg = tool_info("ffmpeg.exe")
     ffprobe = tool_info("ffprobe.exe")
     cuda = collect_cuda_diagnostics()
-    print_json(
-        {
-            "ffmpeg": ffmpeg.__dict__ | {"path": str(ffmpeg.path) if ffmpeg.path else None},
-            "ffprobe": ffprobe.__dict__ | {"path": str(ffprobe.path) if ffprobe.path else None},
-            "cuda": cuda.to_dict(),
-            "claude": context.claude.summary(),
-        }
-    )
-    return 0
+    return {
+        "ffmpeg": ffmpeg.__dict__ | {"path": str(ffmpeg.path) if ffmpeg.path else None},
+        "ffprobe": ffprobe.__dict__ | {"path": str(ffprobe.path) if ffprobe.path else None},
+        "cuda": cuda.to_dict(),
+        "claude": context.claude.summary(),
+    }
+
+
+def strict_doctor_issues(report: dict) -> list[str]:
+    issues: list[str] = []
+    if not report.get("ffmpeg", {}).get("path"):
+        issues.append("ffmpeg.exe was not found on PATH.")
+    if not report.get("ffprobe", {}).get("path"):
+        issues.append("ffprobe.exe was not found on PATH.")
+    cuda = report.get("cuda", {})
+    if not cuda.get("torch_available"):
+        issues.append("PyTorch could not be imported.")
+    if not cuda.get("cuda_available"):
+        issues.append("torch.cuda.is_available() returned false.")
+    return issues
 
 
 def cmd_claude(args: argparse.Namespace) -> int:
@@ -412,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    doctor.add_argument("--strict", action="store_true", help="fail if ffmpeg, ffprobe, PyTorch, or CUDA are unavailable")
     doctor.set_defaults(func=cmd_doctor)
 
     claude = sub.add_parser("claude")

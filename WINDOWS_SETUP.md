@@ -23,7 +23,13 @@ wheel index:
 ```powershell
 .\.venv\Scripts\python.exe -m pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 .\.venv\Scripts\python.exe -m bibl_windows doctor
+.\.venv\Scripts\python.exe -m bibl_windows doctor --strict
 ```
+
+`install.ps1` preserves an existing `.venv` only when it is the requested
+64-bit Python version. If the version or architecture is wrong, it removes the
+project-local `.venv` and recreates it before installing packages. The final
+strict doctor check must pass before installation is reported as complete.
 
 ## Run
 

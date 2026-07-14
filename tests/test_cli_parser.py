@@ -31,6 +31,11 @@ def test_run_parser_accepts_dry_run():
     assert args.dry_run
 
 
+def test_doctor_parser_accepts_strict():
+    args = build_parser().parse_args(["doctor", "--strict"])
+    assert args.strict is True
+
+
 def test_run_parser_accepts_stt_batch_size():
     args = build_parser().parse_args(["run", "sample.mp4", "--stt-batch-size", "2"])
     assert args.stt_batch_size == 2

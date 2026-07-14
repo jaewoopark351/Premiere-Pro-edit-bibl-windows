@@ -82,11 +82,12 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 - Windows Python launcher `py`
 - Python 3.12 64-bit
-- 기존 `.venv` Python 정보
+- 기존 `.venv` Python 버전/64-bit 여부
 - FFmpeg/FFprobe PATH
 - NVIDIA GPU와 VRAM 정보
 - CUDA PyTorch cu128 패키지
 - `constraints-windows-cu128.txt` 기반 Windows 의존성
+- 설치 마지막의 `doctor --strict` 필수 조건
 
 수동 설치:
 
@@ -102,7 +103,13 @@ py -3.12 -m venv .venv
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor
+.\.venv\Scripts\python.exe -B -m bibl_windows.cli doctor --strict
 ```
+
+`doctor`는 진단 정보를 출력하고 호환성을 위해 가능한 한 종료 코드 0을 유지합니다.
+`doctor --strict`는 `ffmpeg.exe`, `ffprobe.exe`, PyTorch import, CUDA 사용 가능 여부가
+빠져 있으면 설치 실패로 간주합니다. GPU가 RTX 5070 Ti보다 낮은 것은 실패가 아니라
+경고/권장 사양 문제로만 취급합니다.
 
 ## FFmpeg 설치
 
